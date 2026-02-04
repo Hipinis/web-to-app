@@ -149,6 +149,8 @@ class ApkTemplate(private val context: Context) {
                 "longPressMenuEnabled": ${config.longPressMenuEnabled},
                 "longPressMenuStyle": "${config.longPressMenuStyle}",
                 "adBlockToggleEnabled": ${config.adBlockToggleEnabled},
+                "popupBlockerEnabled": ${config.popupBlockerEnabled},
+                "popupBlockerToggleEnabled": ${config.popupBlockerToggleEnabled},
                 "initialScale": ${config.initialScale},
                 "newWindowBehavior": "${config.newWindowBehavior}",
                 "enablePaymentSchemes": ${config.enablePaymentSchemes},
@@ -168,6 +170,21 @@ class ApkTemplate(private val context: Context) {
                 "enableJavaScript": ${config.htmlEnableJavaScript},
                 "enableLocalStorage": ${config.htmlEnableLocalStorage},
                 "landscapeMode": ${config.htmlLandscapeMode}
+            },
+            "galleryConfig": {
+                "items": [${config.galleryItems.joinToString(",") { item ->
+                    """{"id":"${escapeJson(item.id)}","assetPath":"${escapeJson(item.assetPath)}","type":"${item.type}","name":"${escapeJson(item.name)}","duration":${item.duration},"thumbnailPath":${item.thumbnailPath?.let { "\"${escapeJson(it)}\"" } ?: "null"}}"""
+                }}],
+                "playMode": "${config.galleryPlayMode}",
+                "imageInterval": ${config.galleryImageInterval},
+                "loop": ${config.galleryLoop},
+                "autoPlay": ${config.galleryAutoPlay},
+                "backgroundColor": "${escapeJson(config.galleryBackgroundColor)}",
+                "showThumbnailBar": ${config.galleryShowThumbnailBar},
+                "showMediaInfo": ${config.galleryShowMediaInfo},
+                "orientation": "${config.galleryOrientation}",
+                "enableAudio": ${config.galleryEnableAudio},
+                "videoAutoNext": ${config.galleryVideoAutoNext}
             },
             "bgmEnabled": ${config.bgmEnabled},
             "bgmPlaylist": [${config.bgmPlaylist.joinToString(",") { item ->
@@ -211,7 +228,8 @@ class ApkTemplate(private val context: Context) {
                 """{"notificationTitle":"${escapeJson(bc.notificationTitle)}","notificationContent":"${escapeJson(bc.notificationContent)}","showNotification":${bc.showNotification},"keepCpuAwake":${bc.keepCpuAwake}}"""
             } else "null"},
             "blackTechConfig": ${gson.toJson(config.blackTechConfig)},
-            "disguiseConfig": ${gson.toJson(config.disguiseConfig)}
+            "disguiseConfig": ${gson.toJson(config.disguiseConfig)},
+            "language": "${config.language}"
         }
         """.trimIndent()
     }
@@ -407,6 +425,8 @@ data class ApkConfig(
     val longPressMenuEnabled: Boolean = true, // Yes否启用长按菜单
     val longPressMenuStyle: String = "FULL", // DISABLED, SIMPLE, FULL
     val adBlockToggleEnabled: Boolean = false, // Allow用户在运行时切换广告拦截开关
+    val popupBlockerEnabled: Boolean = true, // 启用弹窗拦截器
+    val popupBlockerToggleEnabled: Boolean = false, // Allow用户在运行时切换弹窗拦截开关
     
     // 浏览器兼容性增强配置
     val initialScale: Int = 0, // Initial scale (0-200, 0=自动)
@@ -439,6 +459,19 @@ data class ApkConfig(
     val htmlEnableJavaScript: Boolean = true,  // Yes否启用JavaScript
     val htmlEnableLocalStorage: Boolean = true, // Yes否启用本地存储
     val htmlLandscapeMode: Boolean = false,    // HTML应用横屏模式
+    
+    // Gallery 画廊应用配置
+    val galleryItems: List<GalleryShellItemConfig> = emptyList(),
+    val galleryPlayMode: String = "SEQUENTIAL",
+    val galleryImageInterval: Int = 3,
+    val galleryLoop: Boolean = true,
+    val galleryAutoPlay: Boolean = false,
+    val galleryBackgroundColor: String = "#000000",
+    val galleryShowThumbnailBar: Boolean = true,
+    val galleryShowMediaInfo: Boolean = true,
+    val galleryOrientation: String = "PORTRAIT",
+    val galleryEnableAudio: Boolean = true,
+    val galleryVideoAutoNext: Boolean = true,
     
     // Background music配置
     val bgmEnabled: Boolean = false,       // Yes否启用背景音乐
@@ -484,7 +517,10 @@ data class ApkConfig(
     val blackTechConfig: com.webtoapp.core.blacktech.BlackTechConfig? = null,
     
     // App伪装配置（独立模块）
-    val disguiseConfig: com.webtoapp.core.disguise.DisguiseConfig? = null
+    val disguiseConfig: com.webtoapp.core.disguise.DisguiseConfig? = null,
+    
+    // 界面语言配置
+    val language: String = "CHINESE"  // CHINESE, ENGLISH, ARABIC
 )
 
 /**
@@ -495,6 +531,18 @@ data class BackgroundRunConfig(
     val notificationContent: String = "",
     val showNotification: Boolean = true,
     val keepCpuAwake: Boolean = true
+)
+
+/**
+ * Gallery 媒体项配置（用于 APK 构建）
+ */
+data class GalleryShellItemConfig(
+    val id: String,
+    val assetPath: String,  // assets/gallery/item_0.{png|mp4}
+    val type: String,       // IMAGE or VIDEO
+    val name: String,
+    val duration: Long = 0,
+    val thumbnailPath: String? = null  // assets/gallery/thumb_0.jpg
 )
 
 /**

@@ -71,7 +71,8 @@ class ShellModeManager(private val context: Context) {
                 android.util.Log.w("ShellModeManager", "JSON中未找到disguiseConfig字段!")
             }
             val config = Gson().fromJson(jsonStr, ShellConfig::class.java)
-            android.util.Log.d("ShellModeManager", "解析结果: targetUrl=${config?.targetUrl}, splashEnabled=${config?.splashEnabled}")
+            val normalizedAppType = config?.appType?.trim()?.uppercase() ?: ""
+            android.util.Log.d("ShellModeManager", "解析结果: targetUrl=${config?.targetUrl}, splashEnabled=${config?.splashEnabled}, appType=${config?.appType} (normalized=$normalizedAppType)")
             android.util.Log.d("ShellModeManager", "伪装配置: disguiseConfig=${config?.disguiseConfig}")
             android.util.Log.d("ShellModeManager", "黑科技配置: blackTechConfig=${config?.blackTechConfig}")
             android.util.Log.d("ShellModeManager", "扩展模块: extensionModuleIds=${config?.extensionModuleIds?.size ?: 0}, embeddedExtensionModules=${config?.embeddedExtensionModules?.size ?: 0}")
@@ -81,13 +82,15 @@ class ShellModeManager(private val context: Context) {
             // Verify配置有效性
             // HTML/FRONTEND应用不需要targetUrl，使用嵌入的HTML文件
             // Media应用也不需要targetUrl，使用嵌入的媒体文件
+            // Gallery应用也不需要targetUrl，使用嵌入的图片/视频列表
             val isValid = when {
-                config?.appType == "HTML" || config?.appType == "FRONTEND" -> {
+                normalizedAppType == "HTML" || normalizedAppType == "FRONTEND" -> {
                     // Verify entryFile 必须有文件名部分（不能只是 .html 或空字符串）
                     val entryFile = config.htmlConfig.entryFile
                     entryFile.isNotBlank() && entryFile.substringBeforeLast(".").isNotBlank()
                 }
-                config?.appType == "IMAGE" || config?.appType == "VIDEO" -> true // Media应用
+                normalizedAppType == "IMAGE" || normalizedAppType == "VIDEO" -> true // Media应用
+                normalizedAppType == "GALLERY" -> true // Gallery应用（图片/视频画廊）
                 else -> !config?.targetUrl.isNullOrBlank() // WEB应用需要targetUrl
             }
             if (!isValid) {
@@ -308,7 +311,15 @@ data class ShellConfig(
     
     // App伪装配置（独立模块）
     @SerializedName("disguiseConfig")
-    val disguiseConfig: com.webtoapp.core.disguise.DisguiseConfig? = null
+    val disguiseConfig: com.webtoapp.core.disguise.DisguiseConfig? = null,
+    
+    // 界面语言配置
+    @SerializedName("language")
+    val language: String = "CHINESE",  // CHINESE, ENGLISH, ARABIC
+    
+    // Gallery 画廊应用配置
+    @SerializedName("galleryConfig")
+    val galleryConfig: GalleryShellConfig = GalleryShellConfig()
 )
 
 /**
@@ -447,6 +458,67 @@ data class EmbeddedUrlMatch(
 )
 
 /**
+ * Gallery 画廊应用 Shell 配置
+ */
+data class GalleryShellConfig(
+    @SerializedName("items")
+    val items: List<GalleryShellItem> = emptyList(),
+    
+    @SerializedName("playMode")
+    val playMode: String = "SEQUENTIAL",  // SEQUENTIAL, SHUFFLE, SINGLE_LOOP
+    
+    @SerializedName("imageInterval")
+    val imageInterval: Int = 3,
+    
+    @SerializedName("loop")
+    val loop: Boolean = true,
+    
+    @SerializedName("autoPlay")
+    val autoPlay: Boolean = false,
+    
+    @SerializedName("backgroundColor")
+    val backgroundColor: String = "#000000",
+    
+    @SerializedName("showThumbnailBar")
+    val showThumbnailBar: Boolean = true,
+    
+    @SerializedName("showMediaInfo")
+    val showMediaInfo: Boolean = true,
+    
+    @SerializedName("orientation")
+    val orientation: String = "PORTRAIT",  // PORTRAIT, LANDSCAPE
+    
+    @SerializedName("enableAudio")
+    val enableAudio: Boolean = true,
+    
+    @SerializedName("videoAutoNext")
+    val videoAutoNext: Boolean = true
+)
+
+/**
+ * Gallery 媒体项 Shell 配置
+ */
+data class GalleryShellItem(
+    @SerializedName("id")
+    val id: String = "",
+    
+    @SerializedName("assetPath")
+    val assetPath: String = "",  // assets/gallery/item_0.{png|mp4}
+    
+    @SerializedName("type")
+    val type: String = "IMAGE",  // IMAGE or VIDEO
+    
+    @SerializedName("name")
+    val name: String = "",
+    
+    @SerializedName("duration")
+    val duration: Long = 0,
+    
+    @SerializedName("thumbnailPath")
+    val thumbnailPath: String? = null  // assets/gallery/thumb_0.jpg
+)
+
+/**
  * 媒体应用 Shell 配置
  */
 data class MediaShellConfig(
@@ -555,7 +627,13 @@ data class WebViewShellConfig(
     val longPressMenuStyle: String = "FULL", // DISABLED, SIMPLE, FULL
     
     @SerializedName("adBlockToggleEnabled")
-    val adBlockToggleEnabled: Boolean = false // Allow用户在运行时切换广告拦截开关
+    val adBlockToggleEnabled: Boolean = false, // Allow用户在运行时切换广告拦截开关
+    
+    @SerializedName("popupBlockerEnabled")
+    val popupBlockerEnabled: Boolean = true, // 启用弹窗拦截器
+    
+    @SerializedName("popupBlockerToggleEnabled")
+    val popupBlockerToggleEnabled: Boolean = false // Allow用户在运行时切换弹窗拦截开关
 )
 
 /**

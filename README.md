@@ -549,6 +549,28 @@ MIT License
 
 ## 📜 Changelog
 
+### v1.9.5
+**New Features**
+- Cookies persistence feature
+- Multi API key management configuration
+- Model name search feature
+- Hide URL preview feature
+- Popup blocker feature
+
+**Improvements**
+- Optimized custom API endpoint adaptation
+- Optimized model name display
+- Optimized multi-language content adaptation
+
+**Bug Fixes**
+- Fixed gallery app build path issue
+- Fixed microphone permission issue
+- Fixed zoom property not working issue
+- Fixed activation code language display issue
+- Fixed frontend and gallery app filename display issue
+- Fixed core config edit for some app types not working
+- Fixed keyboard initialization issue
+
 ### v1.9.0
 **New Features**
 - Browser Engine: Support for custom WebView kernel configuration

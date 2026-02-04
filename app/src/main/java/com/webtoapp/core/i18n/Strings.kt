@@ -5550,6 +5550,18 @@ object Strings {
         AppLanguage.ENGLISH -> "Open external links in browser"
         AppLanguage.ARABIC -> "فتح الروابط الخارجية في المتصفح"
     }
+    
+    val crossOriginIsolationSetting: String get() = when (lang) {
+        AppLanguage.CHINESE -> "SharedArrayBuffer / FFmpeg"
+        AppLanguage.ENGLISH -> "SharedArrayBuffer / FFmpeg"
+        AppLanguage.ARABIC -> "SharedArrayBuffer / FFmpeg"
+    }
+    
+    val crossOriginIsolationSettingHint: String get() = when (lang) {
+        AppLanguage.CHINESE -> "启用跨域隔离 (COOP/COEP)，支持 FFmpeg.wasm 等库"
+        AppLanguage.ENGLISH -> "Enable cross-origin isolation (COOP/COEP), supports FFmpeg.wasm and similar libraries"
+        AppLanguage.ARABIC -> "تمكين العزل عبر الأصل (COOP/COEP)، يدعم FFmpeg.wasm والمكتبات المماثلة"
+    }
 
     // ==================== 隔离配置选项 ====================
     val fingerprintProtection: String get() = when (lang) {
@@ -6861,6 +6873,97 @@ object Strings {
     }
     
     // ==================== 更新日志 ====================
+    // v1.9.5
+    val cookiesPersistenceFeature: String get() = when (lang) {
+        AppLanguage.CHINESE -> "新增cookies持久化"
+        AppLanguage.ENGLISH -> "Cookies persistence feature"
+        AppLanguage.ARABIC -> "ميزة حفظ ملفات تعريف الارتباط"
+    }
+    
+    val multiApiKeyManagement: String get() = when (lang) {
+        AppLanguage.CHINESE -> "新增多apikey管理配置"
+        AppLanguage.ENGLISH -> "Multi API key management"
+        AppLanguage.ARABIC -> "إدارة مفاتيح API المتعددة"
+    }
+    
+    val modelNameSearchFeature: String get() = when (lang) {
+        AppLanguage.CHINESE -> "新增模型名称搜索功能"
+        AppLanguage.ENGLISH -> "Model name search feature"
+        AppLanguage.ARABIC -> "ميزة البحث عن اسم النموذج"
+    }
+    
+    val hideUrlPreviewFeature: String get() = when (lang) {
+        AppLanguage.CHINESE -> "新增隐藏URL预览功能"
+        AppLanguage.ENGLISH -> "Hide URL preview feature"
+        AppLanguage.ARABIC -> "ميزة إخفاء معاينة URL"
+    }
+    
+    val popupBlockerFeature: String get() = when (lang) {
+        AppLanguage.CHINESE -> "新增弹窗拦截器功能"
+        AppLanguage.ENGLISH -> "Popup blocker feature"
+        AppLanguage.ARABIC -> "ميزة حظر النوافذ المنبثقة"
+    }
+    
+    val optimizeCustomApiEndpoint: String get() = when (lang) {
+        AppLanguage.CHINESE -> "优化自定义api端点适配"
+        AppLanguage.ENGLISH -> "Optimized custom API endpoint adaptation"
+        AppLanguage.ARABIC -> "تحسين تكييف نقطة نهاية API المخصصة"
+    }
+    
+    val optimizeModelNameDisplay: String get() = when (lang) {
+        AppLanguage.CHINESE -> "优化模型名称显示"
+        AppLanguage.ENGLISH -> "Optimized model name display"
+        AppLanguage.ARABIC -> "تحسين عرض اسم النموذج"
+    }
+    
+    val optimizeMultiLanguageAdaptation: String get() = when (lang) {
+        AppLanguage.CHINESE -> "优化部分内容的多语言适配"
+        AppLanguage.ENGLISH -> "Optimized multi-language content adaptation"
+        AppLanguage.ARABIC -> "تحسين تكييف المحتوى متعدد اللغات"
+    }
+    
+    val fixGalleryBuildPath: String get() = when (lang) {
+        AppLanguage.CHINESE -> "修复画廊应用构建路径问题"
+        AppLanguage.ENGLISH -> "Fixed gallery app build path issue"
+        AppLanguage.ARABIC -> "إصلاح مشكلة مسار بناء تطبيق المعرض"
+    }
+    
+    val fixMicrophonePermission: String get() = when (lang) {
+        AppLanguage.CHINESE -> "修复麦克风权限问题"
+        AppLanguage.ENGLISH -> "Fixed microphone permission issue"
+        AppLanguage.ARABIC -> "إصلاح مشكلة إذن الميكروفون"
+    }
+    
+    val fixZoomPropertyNotWorking: String get() = when (lang) {
+        AppLanguage.CHINESE -> "修复zoom属性不生效问题"
+        AppLanguage.ENGLISH -> "Fixed zoom property not working issue"
+        AppLanguage.ARABIC -> "إصلاح مشكلة عدم عمل خاصية التكبير"
+    }
+    
+    val fixActivationCodeLanguage: String get() = when (lang) {
+        AppLanguage.CHINESE -> "修复激活码语言显示问题"
+        AppLanguage.ENGLISH -> "Fixed activation code language display issue"
+        AppLanguage.ARABIC -> "إصلاح مشكلة عرض لغة رمز التفعيل"
+    }
+    
+    val fixFrontendGalleryFilename: String get() = when (lang) {
+        AppLanguage.CHINESE -> "修复前端应用和画廊应用显示文件名问题"
+        AppLanguage.ENGLISH -> "Fixed frontend and gallery app filename display issue"
+        AppLanguage.ARABIC -> "إصلاح مشكلة عرض اسم ملف التطبيق الأمامي والمعرض"
+    }
+    
+    val fixCoreConfigEditAppType: String get() = when (lang) {
+        AppLanguage.CHINESE -> "修复编辑核心配置功能部分应用类型失效问题"
+        AppLanguage.ENGLISH -> "Fixed core config edit for some app types not working"
+        AppLanguage.ARABIC -> "إصلاح مشكلة عدم عمل تحرير الإعدادات الأساسية لبعض أنواع التطبيقات"
+    }
+    
+    val fixKeyboardInitIssue: String get() = when (lang) {
+        AppLanguage.CHINESE -> "修复键盘初始化问题"
+        AppLanguage.ENGLISH -> "Fixed keyboard initialization issue"
+        AppLanguage.ARABIC -> "إصلاح مشكلة تهيئة لوحة المفاتيح"
+    }
+    
     // v1.9.0
     val browserEngineFeature: String get() = when (lang) {
         AppLanguage.CHINESE -> "新增浏览器内核功能"
@@ -12957,6 +13060,78 @@ object Strings {
         AppLanguage.ARABIC -> "نقطة نهاية متوافقة مع OpenAI"
     }
     
+    val apiFormat: String get() = when (lang) {
+        AppLanguage.CHINESE -> "API 格式"
+        AppLanguage.ENGLISH -> "API Format"
+        AppLanguage.ARABIC -> "تنسيق API"
+    }
+    
+    val apiKeyAliasPlaceholder: String get() = when (lang) {
+        AppLanguage.CHINESE -> "例如：我的 GPT-4 Key"
+        AppLanguage.ENGLISH -> "e.g. My GPT-4 Key"
+        AppLanguage.ARABIC -> "مثال: مفتاح GPT-4 الخاص بي"
+    }
+    
+    val modelsEndpoint: String get() = when (lang) {
+        AppLanguage.CHINESE -> "模型列表端点"
+        AppLanguage.ENGLISH -> "Models Endpoint"
+        AppLanguage.ARABIC -> "نقطة نهاية النماذج"
+    }
+    
+    val modelsEndpointHint: String get() = when (lang) {
+        AppLanguage.CHINESE -> "默认: /v1/models"
+        AppLanguage.ENGLISH -> "Default: /v1/models"
+        AppLanguage.ARABIC -> "الافتراضي: /v1/models"
+    }
+    
+    val chatEndpoint: String get() = when (lang) {
+        AppLanguage.CHINESE -> "聊天端点"
+        AppLanguage.ENGLISH -> "Chat Endpoint"
+        AppLanguage.ARABIC -> "نقطة نهاية الدردشة"
+    }
+    
+    val chatEndpointHint: String get() = when (lang) {
+        AppLanguage.CHINESE -> "默认: /v1/chat/completions"
+        AppLanguage.ENGLISH -> "Default: /v1/chat/completions"
+        AppLanguage.ARABIC -> "الافتراضي: /v1/chat/completions"
+    }
+    
+    val selectApiKey: String get() = when (lang) {
+        AppLanguage.CHINESE -> "选择 API Key"
+        AppLanguage.ENGLISH -> "Select API Key"
+        AppLanguage.ARABIC -> "اختر مفتاح API"
+    }
+    
+    val batchSelectModels: String get() = when (lang) {
+        AppLanguage.CHINESE -> "批量选择模型"
+        AppLanguage.ENGLISH -> "Batch Select Models"
+        AppLanguage.ARABIC -> "تحديد النماذج دفعة واحدة"
+    }
+    
+    val selectedModelsCount: String get() = when (lang) {
+        AppLanguage.CHINESE -> "已选择 %d 个模型"
+        AppLanguage.ENGLISH -> "%d models selected"
+        AppLanguage.ARABIC -> "تم تحديد %d نماذج"
+    }
+    
+    val addSelectedModels: String get() = when (lang) {
+        AppLanguage.CHINESE -> "添加所选模型"
+        AppLanguage.ENGLISH -> "Add Selected Models"
+        AppLanguage.ARABIC -> "إضافة النماذج المحددة"
+    }
+    
+    val searchModels: String get() = when (lang) {
+        AppLanguage.CHINESE -> "搜索模型名称或 ID..."
+        AppLanguage.ENGLISH -> "Search model name or ID..."
+        AppLanguage.ARABIC -> "ابحث عن اسم النموذج أو المعرف..."
+    }
+    
+    val noSearchResults: String get() = when (lang) {
+        AppLanguage.CHINESE -> "没有找到匹配的模型"
+        AppLanguage.ENGLISH -> "No matching models found"
+        AppLanguage.ARABIC -> "لم يتم العثور على نماذج مطابقة"
+    }
+    
     val sortByName: String get() = when (lang) {
         AppLanguage.CHINESE -> "按名称"
         AppLanguage.ENGLISH -> "By Name"
@@ -14043,9 +14218,9 @@ object Strings {
     
     // ==================== 黑科技功能 ====================
     val blackTechFeatures: String get() = when (lang) {
-        AppLanguage.CHINESE -> "Black tech features"
-        AppLanguage.ENGLISH -> "Advanced Features"
-        AppLanguage.ARABIC -> "ميزات متقدمة"
+        AppLanguage.CHINESE -> "黑科技功能"
+        AppLanguage.ENGLISH -> "Black Tech Features"
+        AppLanguage.ARABIC -> "ميزات التقنية السوداء"
     }
     
     val blackTechWarning: String get() = when (lang) {
@@ -14716,7 +14891,7 @@ object Strings {
     }
     
     val longPressMenuSaveImage: String get() = when (lang) {
-        AppLanguage.CHINESE -> "Save image"
+        AppLanguage.CHINESE -> "保存图片"
         AppLanguage.ENGLISH -> "Save Image"
         AppLanguage.ARABIC -> "حفظ الصورة"
     }
@@ -14728,7 +14903,7 @@ object Strings {
     }
     
     val longPressMenuDownloadVideo: String get() = when (lang) {
-        AppLanguage.CHINESE -> "Download video"
+        AppLanguage.CHINESE -> "下载视频"
         AppLanguage.ENGLISH -> "Download Video"
         AppLanguage.ARABIC -> "تنزيل الفيديو"
     }
@@ -14740,7 +14915,7 @@ object Strings {
     }
     
     val longPressMenuCopyLink: String get() = when (lang) {
-        AppLanguage.CHINESE -> "Copy link"
+        AppLanguage.CHINESE -> "复制链接"
         AppLanguage.ENGLISH -> "Copy Link"
         AppLanguage.ARABIC -> "نسخ الرابط"
     }
@@ -14752,7 +14927,7 @@ object Strings {
     }
     
     val longPressMenuOpenInBrowser: String get() = when (lang) {
-        AppLanguage.CHINESE -> "Open in browser"
+        AppLanguage.CHINESE -> "在浏览器中打开"
         AppLanguage.ENGLISH -> "Open in Browser"
         AppLanguage.ARABIC -> "فتح في المتصفح"
     }
@@ -14765,7 +14940,7 @@ object Strings {
     
     // ==================== 长按菜单设置 ====================
     val longPressMenuSettings: String get() = when (lang) {
-        AppLanguage.CHINESE -> "Long press menu"
+        AppLanguage.CHINESE -> "长按菜单"
         AppLanguage.ENGLISH -> "Long Press Menu"
         AppLanguage.ARABIC -> "قائمة الضغط المطول"
     }
@@ -15572,6 +15747,12 @@ object Strings {
         AppLanguage.CHINESE -> "视频"
         AppLanguage.ENGLISH -> "Videos"
         AppLanguage.ARABIC -> "فيديوهات"
+    }
+    
+    val galleryEmpty: String get() = when (lang) {
+        AppLanguage.CHINESE -> "无媒体文件"
+        AppLanguage.ENGLISH -> "No media files"
+        AppLanguage.ARABIC -> "لا توجد ملفات وسائط"
     }
     
     val galleryTotalSize: String get() = when (lang) {

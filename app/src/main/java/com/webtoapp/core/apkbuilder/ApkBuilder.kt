@@ -285,6 +285,14 @@ class ApkBuilder(private val context: Context) {
                 emptyList()
             }
             
+            // Get gallery items (for GALLERY app type)
+            val galleryItems = if (webApp.appType == com.webtoapp.data.model.AppType.GALLERY) {
+                webApp.galleryConfig?.items ?: emptyList()
+            } else {
+                emptyList()
+            }
+            logger.logKeyValue("galleryItems.size", galleryItems.size)
+            
             // Generate encryption key (if encryption enabled)
             // Important: Use JarSigner's certificate signature hash to ensure same signature for packaging and runtime
             val encryptionKey: SecretKey? = if (encryptionConfig.enabled) {
@@ -305,7 +313,7 @@ class ApkBuilder(private val context: Context) {
             modifyApk(
                 templateApk, unsignedApk, config, webApp.iconPath, 
                 webApp.getSplashMediaPath(), mediaContentPath,
-                bgmPlaylistPaths, bgmLrcDataList, htmlFiles,
+                bgmPlaylistPaths, bgmLrcDataList, htmlFiles, galleryItems,
                 encryptionConfig, encryptionKey,
                 architecture.abiFilters
             ) { progress ->
@@ -486,6 +494,7 @@ class ApkBuilder(private val context: Context) {
         bgmPlaylistPaths: List<String> = emptyList(),
         bgmLrcDataList: List<LrcData?> = emptyList(),
         htmlFiles: List<com.webtoapp.data.model.HtmlFile> = emptyList(),
+        galleryItems: List<com.webtoapp.data.model.GalleryItem> = emptyList(),
         encryptionConfig: EncryptionConfig = EncryptionConfig.DISABLED,
         encryptionKey: SecretKey? = null,
         abiFilters: List<String> = emptyList(),  // Architecture filter, empty means no filter
@@ -656,6 +665,15 @@ class ApkBuilder(private val context: Context) {
                     }
                 } else if (config.appType == "HTML") {
                     logger.warn("HTML app but htmlFiles is empty! htmlConfig=${config.htmlEntryFile}")
+                }
+                
+                // Embed gallery items (Gallery app)
+                if (config.appType == "GALLERY" && galleryItems.isNotEmpty()) {
+                    logger.section("Embed Gallery Items")
+                    addGalleryItemsToAssets(zipOut, galleryItems, assetEncryptor, encryptionConfig)
+                    logger.logKeyValue("galleryItemsEmbeddedCount", galleryItems.size)
+                } else if (config.appType == "GALLERY") {
+                    logger.warn("Gallery app but galleryItems is empty!")
                 }
             }
         }
@@ -899,6 +917,78 @@ class ApkBuilder(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e("ApkBuilder", "Failed to embed media content", e)
+        }
+    }
+    
+    /**
+     * Add gallery media items to assets/gallery directory
+     * Each item is saved as gallery/item_X.{png|mp4}
+     * Thumbnails are saved as gallery/thumb_X.jpg
+     */
+    private fun addGalleryItemsToAssets(
+        zipOut: ZipOutputStream,
+        galleryItems: List<com.webtoapp.data.model.GalleryItem>,
+        encryptor: AssetEncryptor? = null,
+        encryptionConfig: EncryptionConfig = EncryptionConfig.DISABLED
+    ) {
+        Log.d("ApkBuilder", "Preparing to embed ${galleryItems.size} gallery items, encrypt=${encryptionConfig.encryptMedia}")
+        
+        galleryItems.forEachIndexed { index, item ->
+            try {
+                val mediaFile = File(item.path)
+                if (!mediaFile.exists()) {
+                    Log.w("ApkBuilder", "Gallery item file not found: ${item.path}")
+                    return@forEachIndexed
+                }
+                if (!mediaFile.canRead()) {
+                    Log.w("ApkBuilder", "Gallery item file cannot be read: ${item.path}")
+                    return@forEachIndexed
+                }
+                
+                val ext = if (item.type == com.webtoapp.data.model.GalleryItemType.VIDEO) "mp4" else "png"
+                val assetName = "gallery/item_$index.$ext"
+                val isVideo = item.type == com.webtoapp.data.model.GalleryItemType.VIDEO
+                val fileSize = mediaFile.length()
+                val largeFileThreshold = 10 * 1024 * 1024L
+                
+                // Embed media file
+                if (encryptionConfig.encryptMedia && encryptor != null) {
+                    if (isVideo && fileSize > largeFileThreshold) {
+                        val encryptedData = encryptLargeFile(mediaFile, assetName, encryptor)
+                        writeEntryDeflated(zipOut, "assets/${assetName}.enc", encryptedData)
+                    } else {
+                        val data = mediaFile.readBytes()
+                        val encrypted = encryptor.encrypt(data, assetName)
+                        writeEntryDeflated(zipOut, "assets/${assetName}.enc", encrypted)
+                    }
+                    Log.d("ApkBuilder", "Gallery item encrypted and embedded: assets/${assetName}.enc")
+                } else {
+                    if (isVideo && fileSize > largeFileThreshold) {
+                        writeEntryStoredStreaming(zipOut, "assets/$assetName", mediaFile)
+                    } else {
+                        writeEntryStoredSimple(zipOut, "assets/$assetName", mediaFile.readBytes())
+                    }
+                    Log.d("ApkBuilder", "Gallery item embedded(STORED): assets/$assetName (${fileSize / 1024} KB)")
+                }
+                
+                // Embed thumbnail (if exists)
+                item.thumbnailPath?.let { thumbPath ->
+                    val thumbFile = File(thumbPath)
+                    if (thumbFile.exists() && thumbFile.canRead()) {
+                        val thumbAssetName = "gallery/thumb_$index.jpg"
+                        val thumbBytes = thumbFile.readBytes()
+                        if (encryptionConfig.encryptMedia && encryptor != null) {
+                            val encryptedThumb = encryptor.encrypt(thumbBytes, thumbAssetName)
+                            writeEntryDeflated(zipOut, "assets/${thumbAssetName}.enc", encryptedThumb)
+                        } else {
+                            writeEntryDeflated(zipOut, "assets/$thumbAssetName", thumbBytes)
+                        }
+                        Log.d("ApkBuilder", "Gallery thumbnail embedded: assets/$thumbAssetName")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ApkBuilder", "Failed to embed gallery item ${item.path}", e)
+            }
         }
     }
     
@@ -1587,6 +1677,7 @@ fun WebApp.toApkConfig(packageName: String): ApkConfig {
             "file:///android_asset/html/$entryFile"
         }
         com.webtoapp.data.model.AppType.IMAGE, com.webtoapp.data.model.AppType.VIDEO -> "asset://media_content"
+        com.webtoapp.data.model.AppType.GALLERY -> "gallery://content"  // Gallery应用不需要targetUrl
         else -> url
     }
     
@@ -1637,6 +1728,8 @@ fun WebApp.toApkConfig(packageName: String): ApkConfig {
         longPressMenuEnabled = webViewConfig.longPressMenuEnabled,
         longPressMenuStyle = webViewConfig.longPressMenuStyle.name,
         adBlockToggleEnabled = webViewConfig.adBlockToggleEnabled,
+        popupBlockerEnabled = webViewConfig.popupBlockerEnabled,
+        popupBlockerToggleEnabled = webViewConfig.popupBlockerToggleEnabled,
         splashEnabled = splashEnabled,
         splashType = splashConfig?.type?.name ?: "IMAGE",
         splashDuration = splashConfig?.duration ?: 3,
@@ -1659,6 +1752,29 @@ fun WebApp.toApkConfig(packageName: String): ApkConfig {
         htmlEnableJavaScript = htmlConfig?.enableJavaScript ?: true,
         htmlEnableLocalStorage = htmlConfig?.enableLocalStorage ?: true,
         htmlLandscapeMode = htmlConfig?.landscapeMode ?: false,
+        
+        // Gallery app config
+        galleryItems = galleryConfig?.items?.mapIndexed { index, item ->
+            val ext = if (item.type == com.webtoapp.data.model.GalleryItemType.VIDEO) "mp4" else "png"
+            GalleryShellItemConfig(
+                id = item.id,
+                assetPath = "gallery/item_$index.$ext",
+                type = item.type.name,
+                name = item.name,
+                duration = item.duration,
+                thumbnailPath = if (item.thumbnailPath != null) "gallery/thumb_$index.jpg" else null
+            )
+        } ?: emptyList(),
+        galleryPlayMode = galleryConfig?.playMode?.name ?: "SEQUENTIAL",
+        galleryImageInterval = galleryConfig?.imageInterval ?: 3,
+        galleryLoop = galleryConfig?.loop ?: true,
+        galleryAutoPlay = galleryConfig?.autoPlay ?: false,
+        galleryBackgroundColor = galleryConfig?.backgroundColor ?: "#000000",
+        galleryShowThumbnailBar = galleryConfig?.showThumbnailBar ?: true,
+        galleryShowMediaInfo = galleryConfig?.showMediaInfo ?: true,
+        galleryOrientation = galleryConfig?.orientation?.name ?: "PORTRAIT",
+        galleryEnableAudio = galleryConfig?.enableAudio ?: true,
+        galleryVideoAutoNext = galleryConfig?.videoAutoNext ?: true,
         
         // Background music config
         bgmEnabled = bgmEnabled,
@@ -1719,7 +1835,9 @@ fun WebApp.toApkConfig(packageName: String): ApkConfig {
         // Black tech feature config (independent module)
         blackTechConfig = blackTechConfig,
         // App disguise config (independent module)
-        disguiseConfig = disguiseConfig
+        disguiseConfig = disguiseConfig,
+        // UI language config - use current app language
+        language = com.webtoapp.core.i18n.Strings.currentLanguage.value.name
     )
 }
 

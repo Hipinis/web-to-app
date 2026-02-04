@@ -90,6 +90,17 @@ class WebViewManager(
         // Track this WebView
         managedWebViews[webView] = true
         
+        // ============ Cookie 持久化配置 ============
+        // Enable cookies and third-party cookies for login persistence
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptCookie(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.setAcceptThirdPartyCookies(webView, true)
+        }
+        // Ensure cookies are persisted to disk
+        cookieManager.flush()
+        android.util.Log.d("WebViewManager", "Cookie persistence enabled")
+        
         webView.apply {
             settings.apply {
                 // JavaScript
@@ -194,6 +205,12 @@ class WebViewManager(
             if (config.enableShareBridge) {
                 addJavascriptInterface(ShareBridge(context), "NativeShareBridge")
             }
+            
+            // ============ 键盘输入支持 ============
+            // 设置焦点属性，确保不需要触屏交互也能使用键盘
+            isFocusable = true
+            isFocusableInTouchMode = true
+            requestFocus()
         }
     }
     
@@ -328,6 +345,13 @@ class WebViewManager(
                 view?.postDelayed({
                     injectScripts(view, config.injectScripts, ScriptRunTime.DOCUMENT_IDLE, view.url)
                 }, 500)
+                
+                // Persist cookies to disk after page load
+                // This ensures login state is saved
+                CookieManager.getInstance().flush()
+                
+                // 确保页面加载后 WebView 仍有焦点，支持键盘输入
+                view?.requestFocus()
             }
 
             override fun onReceivedError(
@@ -536,7 +560,12 @@ class WebViewManager(
             }
 
             override fun onPermissionRequest(request: PermissionRequest?) {
-                callbacks.onPermissionRequest(request)
+                android.util.Log.d("WebViewManager", "onPermissionRequest called: ${request?.resources?.joinToString()}")
+                if (request != null) {
+                    callbacks.onPermissionRequest(request)
+                } else {
+                    android.util.Log.w("WebViewManager", "onPermissionRequest: request is null!")
+                }
             }
 
             override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -1004,86 +1033,136 @@ class WebViewManager(
                     (function() {
                         'use strict';
                         
-                        // Listen DOM 变化，处理动态添加的元素
-                        var observer = new MutationObserver(function(mutations) {
-                            mutations.forEach(function(mutation) {
-                                if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
-                                    convertZoomToTransform(mutation.target);
-                                }
-                                mutation.addedNodes.forEach(function(node) {
-                                    if (node.nodeType === 1) {
-                                        convertZoomToTransform(node);
-                                    }
-                                });
-                            });
-                        });
+                        // 标记 polyfill 已加载
+                        if (window.__webtoapp_zoom_polyfill__) return;
+                        window.__webtoapp_zoom_polyfill__ = true;
+                        
+                        // 存储元素原始宽度
+                        var originalWidths = new WeakMap();
                         
                         function convertZoomToTransform(el) {
                             if (!el || !el.style) return;
                             
                             var zoom = el.style.zoom;
-                            if (zoom && zoom !== '1' && zoom !== 'normal' && zoom !== 'initial') {
+                            if (zoom && zoom !== '1' && zoom !== 'normal' && zoom !== 'initial' && zoom !== '') {
                                 var scale = parseFloat(zoom);
                                 if (zoom.indexOf('%') !== -1) {
                                     scale = parseFloat(zoom) / 100;
                                 }
-                                if (!isNaN(scale) && scale !== 1) {
+                                if (!isNaN(scale) && scale > 0 && scale !== 1) {
+                                    // 保存原始宽度
+                                    if (!originalWidths.has(el)) {
+                                        originalWidths.set(el, el.style.width || '');
+                                    }
+                                    // 清除 zoom 并应用 transform
                                     el.style.zoom = '';
                                     el.style.transform = 'scale(' + scale + ')';
                                     el.style.transformOrigin = 'top left';
+                                    // 缩小时需要扩展宽度以避免内容被裁切
                                     if (scale < 1) {
                                         el.style.width = (100 / scale) + '%';
                                     }
-                                    console.log('[WebToApp] Converted zoom to transform:', scale);
+                                    console.log('[WebToApp] Converted zoom to transform:', scale, 'for element:', el.tagName);
                                 }
                             }
                         }
                         
-                        // Listen body
-                        if (document.body) {
-                            observer.observe(document.body, {
-                                attributes: true,
-                                childList: true,
-                                subtree: true,
-                                attributeFilter: ['style']
+                        // MutationObserver 监听 style 属性变化
+                        var observer = new MutationObserver(function(mutations) {
+                            mutations.forEach(function(mutation) {
+                                if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                                    convertZoomToTransform(mutation.target);
+                                }
+                                if (mutation.addedNodes) {
+                                    mutation.addedNodes.forEach(function(node) {
+                                        if (node.nodeType === 1) {
+                                            convertZoomToTransform(node);
+                                            // 也检查子元素
+                                            if (node.querySelectorAll) {
+                                                node.querySelectorAll('*').forEach(function(child) {
+                                                    convertZoomToTransform(child);
+                                                });
+                                            }
+                                        }
+                                    });
+                                }
                             });
-                            convertZoomToTransform(document.body);
+                        });
+                        
+                        // 设置 observer 的函数
+                        function setupObserver() {
+                            if (document.documentElement) {
+                                observer.observe(document.documentElement, {
+                                    attributes: true,
+                                    childList: true,
+                                    subtree: true,
+                                    attributeFilter: ['style']
+                                });
+                                // 初始扫描
+                                if (document.body) {
+                                    convertZoomToTransform(document.body);
+                                    document.body.querySelectorAll('*').forEach(function(el) {
+                                        convertZoomToTransform(el);
+                                    });
+                                }
+                                console.log('[WebToApp] CSS zoom observer started');
+                            }
                         }
                         
-                        // Override CSSStyleDeclaration.zoom setter
+                        // DOM 就绪后设置 observer
+                        if (document.readyState === 'loading') {
+                            document.addEventListener('DOMContentLoaded', setupObserver);
+                        } else {
+                            setupObserver();
+                        }
+                        
+                        // Override CSSStyleDeclaration.zoom setter（最关键的拦截）
                         try {
                             var zoomDescriptor = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, 'zoom');
-                            if (zoomDescriptor) {
-                                Object.defineProperty(CSSStyleDeclaration.prototype, 'zoom', {
-                                    set: function(value) {
-                                        if (value && value !== '1' && value !== 'normal' && value !== 'initial') {
-                                            var scale = parseFloat(value);
-                                            if (String(value).indexOf('%') !== -1) {
-                                                scale = parseFloat(value) / 100;
+                            Object.defineProperty(CSSStyleDeclaration.prototype, 'zoom', {
+                                set: function(value) {
+                                    console.log('[WebToApp] zoom setter called with:', value);
+                                    if (value && value !== '1' && value !== 'normal' && value !== 'initial' && value !== '') {
+                                        var scale = parseFloat(value);
+                                        if (String(value).indexOf('%') !== -1) {
+                                            scale = parseFloat(value) / 100;
+                                        }
+                                        if (!isNaN(scale) && scale > 0 && scale !== 1) {
+                                            this.transform = 'scale(' + scale + ')';
+                                            this.transformOrigin = 'top left';
+                                            if (scale < 1) {
+                                                this.width = (100 / scale) + '%';
                                             }
-                                            if (!isNaN(scale) && scale !== 1) {
-                                                this.transform = 'scale(' + scale + ')';
-                                                this.transformOrigin = 'top left';
-                                                if (scale < 1) {
-                                                    this.width = (100 / scale) + '%';
-                                                }
-                                                console.log('[WebToApp] Intercepted zoom set:', scale);
-                                                return;
-                                            }
+                                            console.log('[WebToApp] Intercepted zoom set, converted to transform:', scale);
+                                            return;
                                         }
-                                        if (zoomDescriptor && zoomDescriptor.set) {
-                                            zoomDescriptor.set.call(this, value);
+                                    }
+                                    // 重置为默认
+                                    if (value === '' || value === '1' || value === 'normal' || value === 'initial') {
+                                        this.transform = '';
+                                        this.transformOrigin = '';
+                                    }
+                                    if (zoomDescriptor && zoomDescriptor.set) {
+                                        zoomDescriptor.set.call(this, value);
+                                    }
+                                },
+                                get: function() {
+                                    // 返回基于 transform 计算的 zoom 值
+                                    var transform = this.transform;
+                                    if (transform && transform.indexOf('scale(') !== -1) {
+                                        var match = transform.match(/scale\(([\d.]+)\)/);
+                                        if (match) {
+                                            return match[1];
                                         }
-                                    },
-                                    get: function() {
-                                        if (zoomDescriptor && zoomDescriptor.get) {
-                                            return zoomDescriptor.get.call(this);
-                                        }
-                                        return '';
-                                    },
-                                    configurable: true
-                                });
-                            }
+                                    }
+                                    if (zoomDescriptor && zoomDescriptor.get) {
+                                        return zoomDescriptor.get.call(this);
+                                    }
+                                    return '1';
+                                },
+                                configurable: true
+                            });
+                            console.log('[WebToApp] zoom setter override installed');
                         } catch(e) {
                             console.warn('[WebToApp] Failed to override zoom setter:', e);
                         }
@@ -1130,29 +1209,267 @@ class WebViewManager(
                 """.trimIndent())
             }
             
-            // 3. Other compatibility fixes
+            // 3. Hide link URL preview (tooltip)
+            // This removes the small URL preview popup when hovering/long-pressing links
+            scripts.add("""
+                // Hide link URL preview for privacy
+                (function() {
+                    'use strict';
+                    
+                    // Inject CSS to disable touch callout and user select on links
+                    var style = document.createElement('style');
+                    style.id = 'webtoapp-hide-url-preview';
+                    style.textContent = `
+                        a {
+                            -webkit-touch-callout: none !important;
+                            -webkit-user-select: none !important;
+                        }
+                    `;
+                    (document.head || document.documentElement).appendChild(style);
+                    
+                    // Remove title attribute from all links to hide URL tooltips
+                    function removeAllTitles() {
+                        document.querySelectorAll('a[title]').forEach(function(link) {
+                            link.removeAttribute('title');
+                        });
+                    }
+                    
+                    // Initial removal
+                    if (document.readyState === 'loading') {
+                        document.addEventListener('DOMContentLoaded', removeAllTitles);
+                    } else {
+                        removeAllTitles();
+                    }
+                    
+                    // Watch for dynamically added links
+                    var titleObserver = new MutationObserver(function(mutations) {
+                        mutations.forEach(function(mutation) {
+                            mutation.addedNodes.forEach(function(node) {
+                                if (node.nodeType === 1) {
+                                    if (node.tagName === 'A' && node.hasAttribute('title')) {
+                                        node.removeAttribute('title');
+                                    }
+                                    node.querySelectorAll && node.querySelectorAll('a[title]').forEach(function(link) {
+                                        link.removeAttribute('title');
+                                    });
+                                }
+                            });
+                        });
+                    });
+                    
+                    if (document.body) {
+                        titleObserver.observe(document.body, { childList: true, subtree: true });
+                    } else {
+                        document.addEventListener('DOMContentLoaded', function() {
+                            titleObserver.observe(document.body, { childList: true, subtree: true });
+                        });
+                    }
+                    
+                    // Intercept setAttribute to prevent title from being set on links
+                    var originalSetAttribute = Element.prototype.setAttribute;
+                    Element.prototype.setAttribute = function(name, value) {
+                        if (this.tagName === 'A' && name.toLowerCase() === 'title') {
+                            return; // Block setting title on links
+                        }
+                        return originalSetAttribute.call(this, name, value);
+                    };
+                    
+                    console.log('[WebToApp] Link URL preview hidden');
+                })();
+            """.trimIndent())
+            
+            // 4. Popup Blocker
+            if (config.popupBlockerEnabled) {
+                scripts.add("""
+                    // Popup Blocker - blocks unwanted popups and redirects
+                    (function() {
+                        'use strict';
+                        
+                        // Track if popup blocker is enabled (can be toggled at runtime)
+                        window.__webtoapp_popup_blocker_enabled__ = true;
+                        
+                        var blockedCount = 0;
+                        var allowedDomains = []; // Can be configured later
+                        
+                        // Store original functions
+                        var originalOpen = window.open;
+                        var originalAlert = window.alert;
+                        var originalConfirm = window.confirm;
+                        
+                        // Helper to check if URL is suspicious
+                        function isSuspiciousUrl(url) {
+                            if (!url) return true;
+                            var lowerUrl = url.toLowerCase();
+                            // Common ad/popup patterns
+                            var suspiciousPatterns = [
+                                'doubleclick', 'googlesyndication', 'googleadservices',
+                                'facebook.com/tr', 'analytics', 'tracker',
+                                'popup', 'popunder', 'clickunder',
+                                'adserver', 'adservice', 'adsense',
+                                'javascript:void', 'about:blank',
+                                'data:text/html'
+                            ];
+                            return suspiciousPatterns.some(function(pattern) {
+                                return lowerUrl.indexOf(pattern) !== -1;
+                            });
+                        }
+                        
+                        // Helper to check if domain is allowed
+                        function isDomainAllowed(url) {
+                            if (!url || allowedDomains.length === 0) return false;
+                            try {
+                                var urlObj = new URL(url, window.location.href);
+                                return allowedDomains.some(function(domain) {
+                                    return urlObj.hostname.indexOf(domain) !== -1;
+                                });
+                            } catch(e) {
+                                return false;
+                            }
+                        }
+                        
+                        // Override window.open
+                        window.open = function(url, target, features) {
+                            if (!window.__webtoapp_popup_blocker_enabled__) {
+                                return originalOpen.apply(window, arguments);
+                            }
+                            
+                            // Allow same-origin and allowed domains
+                            var isSameOrigin = false;
+                            try {
+                                if (url) {
+                                    var urlObj = new URL(url, window.location.href);
+                                    isSameOrigin = urlObj.origin === window.location.origin;
+                                }
+                            } catch(e) {}
+                            
+                            // Block conditions
+                            var shouldBlock = false;
+                            
+                            // Block about:blank and javascript: URLs (common popup tricks)
+                            if (!url || url === 'about:blank' || url.indexOf('javascript:') === 0) {
+                                shouldBlock = true;
+                            }
+                            // Block suspicious URLs
+                            else if (isSuspiciousUrl(url) && !isSameOrigin && !isDomainAllowed(url)) {
+                                shouldBlock = true;
+                            }
+                            
+                            if (shouldBlock) {
+                                blockedCount++;
+                                console.log('[WebToApp PopupBlocker] Blocked popup #' + blockedCount + ':', url || '(empty)');
+                                // Return fake window object to prevent errors
+                                return {
+                                    closed: true,
+                                    close: function() {},
+                                    focus: function() {},
+                                    blur: function() {},
+                                    postMessage: function() {},
+                                    location: { href: '' },
+                                    document: { write: function() {}, close: function() {} }
+                                };
+                            }
+                            
+                            // Allow legitimate popups
+                            var result = originalOpen.apply(window, arguments);
+                            if (!result) {
+                                return {
+                                    closed: false,
+                                    close: function() {},
+                                    focus: function() {},
+                                    blur: function() {},
+                                    postMessage: function() {},
+                                    location: { href: url || '' }
+                                };
+                            }
+                            return result;
+                        };
+                        
+                        // Block popup triggers via setTimeout/setInterval with very short delays
+                        var originalSetTimeout = window.setTimeout;
+                        var originalSetInterval = window.setInterval;
+                        
+                        window.setTimeout = function(fn, delay) {
+                            // Block immediate timeouts that might be popup triggers
+                            if (delay === 0 && typeof fn === 'string' && fn.indexOf('open(') !== -1) {
+                                console.log('[WebToApp PopupBlocker] Blocked setTimeout popup trigger');
+                                return 0;
+                            }
+                            return originalSetTimeout.apply(window, arguments);
+                        };
+                        
+                        // Prevent popunders via document.write
+                        var originalDocWrite = document.write;
+                        var originalDocWriteln = document.writeln;
+                        
+                        function blockSuspiciousWrite(content) {
+                            if (!window.__webtoapp_popup_blocker_enabled__) return false;
+                            if (typeof content !== 'string') return false;
+                            var lowerContent = content.toLowerCase();
+                            // Block writes that create popups or redirects
+                            if (lowerContent.indexOf('window.open') !== -1 ||
+                                lowerContent.indexOf('location.href') !== -1 ||
+                                lowerContent.indexOf('location.replace') !== -1) {
+                                console.log('[WebToApp PopupBlocker] Blocked suspicious document.write');
+                                return true;
+                            }
+                            return false;
+                        }
+                        
+                        document.write = function() {
+                            if (arguments.length > 0 && blockSuspiciousWrite(arguments[0])) {
+                                return;
+                            }
+                            return originalDocWrite.apply(document, arguments);
+                        };
+                        
+                        document.writeln = function() {
+                            if (arguments.length > 0 && blockSuspiciousWrite(arguments[0])) {
+                                return;
+                            }
+                            return originalDocWriteln.apply(document, arguments);
+                        };
+                        
+                        // Expose toggle function
+                        window.__webtoapp_toggle_popup_blocker__ = function(enabled) {
+                            window.__webtoapp_popup_blocker_enabled__ = enabled;
+                            console.log('[WebToApp PopupBlocker] ' + (enabled ? 'Enabled' : 'Disabled'));
+                        };
+                        
+                        // Expose stats
+                        window.__webtoapp_popup_blocker_stats__ = function() {
+                            return { blocked: blockedCount, enabled: window.__webtoapp_popup_blocker_enabled__ };
+                        };
+                        
+                        console.log('[WebToApp] Popup blocker loaded');
+                    })();
+                """.trimIndent())
+            }
+            
+            // 5. Other compatibility fixes
             scripts.add("""
                 // Compatibility fixes
                 (function() {
                     'use strict';
                     
-                    // Fix window.open return value
-                    var originalOpen = window.open;
-                    window.open = function(url, target, features) {
-                        var result = originalOpen.call(window, url, target, features);
-                        // If returns null, return proxy object to prevent script errors
-                        if (!result) {
-                            return {
-                                closed: false,
-                                close: function() {},
-                                focus: function() {},
-                                blur: function() {},
-                                postMessage: function() {},
-                                location: { href: url || '' }
-                            };
-                        }
-                        return result;
-                    };
+                    // Fix window.open return value (fallback for when popup blocker is disabled)
+                    if (!window.__webtoapp_popup_blocker_enabled__) {
+                        var originalOpen = window.open;
+                        window.open = function(url, target, features) {
+                            var result = originalOpen.call(window, url, target, features);
+                            // If returns null, return proxy object to prevent script errors
+                            if (!result) {
+                                return {
+                                    closed: false,
+                                    close: function() {},
+                                    focus: function() {},
+                                    blur: function() {},
+                                    postMessage: function() {},
+                                    location: { href: url || '' }
+                                };
+                            }
+                            return result;
+                        };
+                    }
                     
                     // Fix requestIdleCallback (some WebViews don't support)
                     if (!window.requestIdleCallback) {

@@ -79,6 +79,90 @@ fun CreateHtmlAppScreen(
     var cssFile by remember { mutableStateOf<HtmlFile?>(null) }
     var jsFile by remember { mutableStateOf<HtmlFile?>(null) }
     
+    // Configure选项（需要在 LaunchedEffect 之前声明）
+    var enableJavaScript by remember { mutableStateOf(true) }
+    var enableLocalStorage by remember { mutableStateOf(true) }
+    var landscapeMode by remember { mutableStateOf(false) }
+    
+    // Theme配置（需要在 LaunchedEffect 之前声明）
+    var themeType by remember { mutableStateOf("AURORA") }
+    
+    // 编辑模式：加载现有应用数据到UI状态
+    LaunchedEffect(existingApp) {
+        existingApp?.let { app ->
+            // 加载基本信息
+            appName = app.name
+            appIconPath = app.iconPath
+            
+            // 加载 HTML 配置
+            app.htmlConfig?.let { config ->
+                // 尝试从文件列表中恢复文件槽位
+                config.files.forEach { file ->
+                    when (file.type) {
+                        HtmlFileType.HTML -> {
+                            // 检查文件是否存在
+                            if (java.io.File(file.path).exists()) {
+                                htmlFile = file
+                            }
+                        }
+                        HtmlFileType.CSS -> {
+                            if (java.io.File(file.path).exists()) {
+                                cssFile = file
+                            }
+                        }
+                        HtmlFileType.JS -> {
+                            if (java.io.File(file.path).exists()) {
+                                jsFile = file
+                            }
+                        }
+                        else -> { /* 忽略其他类型 */ }
+                    }
+                }
+                
+                // 如果文件列表为空但 projectId 存在，尝试从目录中加载
+                if (htmlFile == null && config.projectId.isNotBlank()) {
+                    val projectDir = java.io.File(context.filesDir, "html_projects/${config.projectId}")
+                    if (projectDir.exists()) {
+                        projectDir.listFiles()?.forEach { file ->
+                            when {
+                                file.name.endsWith(".html", ignoreCase = true) ||
+                                file.name.endsWith(".htm", ignoreCase = true) -> {
+                                    htmlFile = HtmlFile(
+                                        name = file.name,
+                                        path = file.absolutePath,
+                                        type = HtmlFileType.HTML
+                                    )
+                                }
+                                file.name.endsWith(".css", ignoreCase = true) -> {
+                                    cssFile = HtmlFile(
+                                        name = file.name,
+                                        path = file.absolutePath,
+                                        type = HtmlFileType.CSS
+                                    )
+                                }
+                                file.name.endsWith(".js", ignoreCase = true) -> {
+                                    jsFile = HtmlFile(
+                                        name = file.name,
+                                        path = file.absolutePath,
+                                        type = HtmlFileType.JS
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // 加载配置选项
+                enableJavaScript = config.enableJavaScript
+                enableLocalStorage = config.enableLocalStorage
+                landscapeMode = config.landscapeMode
+            }
+            
+            // 加载主题
+            themeType = app.themeType
+        }
+    }
+    
     // 从AI编程导入文件
     LaunchedEffect(importDir) {
         if (importDir != null) {
@@ -113,14 +197,6 @@ fun CreateHtmlAppScreen(
             }
         }
     }
-    
-    // Configure选项
-    var enableJavaScript by remember { mutableStateOf(true) }
-    var enableLocalStorage by remember { mutableStateOf(true) }
-    var landscapeMode by remember { mutableStateOf(false) }
-    
-    // Theme配置
-    var themeType by remember { mutableStateOf("AURORA") }
     
     // 项目分析结果
     var projectAnalysis by remember { mutableStateOf<HtmlProjectProcessor.ProjectAnalysis?>(null) }

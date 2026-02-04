@@ -297,6 +297,8 @@ data class WebViewConfig(
     val longPressMenuEnabled: Boolean = true, // Yes否启用长按菜单
     val longPressMenuStyle: LongPressMenuStyle = LongPressMenuStyle.FULL, // Long press menu style
     val adBlockToggleEnabled: Boolean = false, // Allow用户在运行时切换广告拦截开关
+    val popupBlockerEnabled: Boolean = true, // 启用弹窗拦截器（拦截 window.open 等弹窗广告）
+    val popupBlockerToggleEnabled: Boolean = false, // Allow用户在运行时切换弹窗拦截开关
     
     // ============ 浏览器兼容性增强配置 ============
     val initialScale: Int = 0, // Initial scale (0-200, 0=自动)，解决 CSS zoom 不生效问题

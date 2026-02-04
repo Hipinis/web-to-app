@@ -69,7 +69,8 @@ class AiApiClient(private val context: Context) {
     suspend fun testConnection(apiKey: ApiKeyConfig): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val baseUrl = (apiKey.baseUrl ?: apiKey.provider.baseUrl).trimEnd('/')
-            val modelsEndpoint = apiKey.provider.modelsEndpoint
+            // 使用自定义端点（如果配置了）
+            val modelsEndpoint = apiKey.getEffectiveModelsEndpoint()
             val fullUrl = buildApiUrl(baseUrl, modelsEndpoint)
             val displayUrl = when (apiKey.provider) {
                 AiProvider.GOOGLE -> "$fullUrl?key=***"
@@ -142,8 +143,11 @@ class AiApiClient(private val context: Context) {
     suspend fun fetchModels(apiKey: ApiKeyConfig): Result<List<AiModel>> = withContext(Dispatchers.IO) {
         try {
             val baseUrl = (apiKey.baseUrl ?: apiKey.provider.baseUrl).trimEnd('/')
-            val modelsEndpoint = apiKey.provider.modelsEndpoint
+            // 使用自定义端点（如果配置了）
+            val modelsEndpoint = apiKey.getEffectiveModelsEndpoint()
             val fullUrl = buildApiUrl(baseUrl, modelsEndpoint)
+            
+            AppLogger.d("AiApiClient", "Fetching models: baseUrl=$baseUrl, endpoint=$modelsEndpoint, fullUrl=$fullUrl")
             
             AppLogger.d("AiApiClient", "Fetching models from: $fullUrl")
             
@@ -1310,14 +1314,13 @@ val json = gson.fromJson(body, JsonObject::class.java)
             addProperty("stream", true)
         }
         
-        val streamEndpoint = when (apiKey.provider) {
-            AiProvider.GLM -> "/v4/chat/completions"
-            AiProvider.VOLCANO -> "/v3/chat/completions"
-            else -> "/v1/chat/completions"
-        }
+        // 使用自定义端点（如果配置了）
+        val streamEndpoint = apiKey.getEffectiveChatEndpoint()
+        
+        android.util.Log.d("AiApiClient", "Building stream request: baseUrl=$baseUrl, endpoint=$streamEndpoint")
         
         return Request.Builder()
-            .url("$baseUrl$streamEndpoint")
+            .url(buildApiUrl(baseUrl, streamEndpoint))
             .header("Authorization", "Bearer ${apiKey.apiKey.sanitize()}")
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")

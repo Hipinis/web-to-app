@@ -94,6 +94,100 @@ class AxmlRebuilder {
     }
     
     /**
+     * Ensure required uses-permission entries exist in manifest (add if missing)
+     */
+    private fun ensureUsesPermissions(parsed: ParsedAxml, permissions: List<String>) {
+        val resourceMap = parsed.resourceMap ?: return
+        val nameAttrIndex = resourceMap.indexOf(ATTR_NAME)
+        if (nameAttrIndex < 0) {
+            Log.w(TAG, "android:name attribute not found in resource map, cannot add permissions")
+            return
+        }
+        
+        val androidNsIndex = getOrAddString(parsed.stringPool, "http://schemas.android.com/apk/res/android")
+        val usesPermissionNameIndex = getOrAddString(parsed.stringPool, "uses-permission")
+        
+        val missing = permissions.filterNot { hasUsesPermission(parsed, it, nameAttrIndex) }
+        if (missing.isEmpty()) return
+        
+        val insertIndex = findApplicationStartIndex(parsed).let { if (it >= 0) it else parsed.chunks.size }
+        val newChunks = mutableListOf<Chunk>()
+        
+        for (perm in missing) {
+            val permValueIndex = getOrAddString(parsed.stringPool, perm)
+            val start = buildActionOrCategoryElement(androidNsIndex, usesPermissionNameIndex, nameAttrIndex, permValueIndex)
+            val end = buildEndElement(androidNsIndex, usesPermissionNameIndex)
+            newChunks.add(start)
+            newChunks.add(end)
+            Log.d(TAG, "Injected uses-permission: $perm")
+        }
+        
+        parsed.chunks.addAll(insertIndex, newChunks)
+    }
+    
+    /**
+     * Check if manifest already declares the given uses-permission
+     */
+    private fun hasUsesPermission(parsed: ParsedAxml, permission: String, nameAttrIndex: Int): Boolean {
+        for (chunk in parsed.chunks) {
+            if (chunk.type != CHUNK_START_ELEMENT) continue
+            val buffer = ByteBuffer.wrap(chunk.data).order(ByteOrder.LITTLE_ENDIAN)
+            buffer.position(16)
+            buffer.int // namespaceUri
+            val elementName = buffer.int
+            buffer.short // attrStart
+            val attrSize = buffer.short.toInt() and 0xFFFF
+            val attrCount = buffer.short.toInt() and 0xFFFF
+            
+            if (attrSize == 0 || attrCount == 0) continue
+            val elementNameStr = parsed.stringPool.strings.getOrNull(elementName) ?: continue
+            if (elementNameStr != "uses-permission") continue
+            
+            for (i in 0 until attrCount) {
+                val attrOffset = 36 + i * attrSize
+                if (attrOffset + 20 > chunk.data.size) break
+                buffer.position(attrOffset)
+                buffer.int // attrNs
+                val attrName = buffer.int
+                buffer.int // attrRawValue
+                buffer.short // valueSize
+                buffer.get() // res0
+                val attrValueType = buffer.get().toInt() and 0xFF
+                val attrValueData = buffer.int
+                
+                if (attrName == nameAttrIndex && attrValueType == 0x03) { // TYPE_STRING
+                    val valueStr = parsed.stringPool.strings.getOrNull(attrValueData)
+                    if (valueStr == permission) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+    
+    /**
+     * Find the index of <application> START_ELEMENT to insert permissions before it
+     */
+    private fun findApplicationStartIndex(parsed: ParsedAxml): Int {
+        val applicationStrIndex = parsed.stringPool.strings.indexOf("application")
+        if (applicationStrIndex < 0) return -1
+        
+        for (i in parsed.chunks.indices) {
+            val chunk = parsed.chunks[i]
+            if (chunk.type != CHUNK_START_ELEMENT) continue
+            val buffer = ByteBuffer.wrap(chunk.data).order(ByteOrder.LITTLE_ENDIAN)
+            buffer.position(16)
+            buffer.int // namespaceUri
+            val name = buffer.int
+            if (name == applicationStrIndex) {
+                return i
+            }
+        }
+        return -1
+    }
+    
+    /**
      * 添加 activity-alias 到 manifest
      * 每个 alias 都指向 ShellActivity，并带有 MAIN/LAUNCHER intent-filter
      * 
@@ -656,6 +750,12 @@ class AxmlRebuilder {
             
             // 步骤5：移除 testOnly 标记
             stripTestOnlyFlag(parsed)
+            
+            // 步骤5.5：确保关键权限存在（避免模板缺失导致功能不可用）
+            ensureUsesPermissions(parsed, listOf(
+                "android.permission.RECORD_AUDIO",
+                "android.permission.CAMERA"
+            ))
             
             // 步骤6：添加 activity-alias（多桌面图标）
             if (aliasCount > 0 && appName.isNotEmpty()) {

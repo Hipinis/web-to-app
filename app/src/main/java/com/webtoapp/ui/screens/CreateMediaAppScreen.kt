@@ -81,6 +81,42 @@ fun CreateMediaAppScreen(
     // Theme配置
     var themeType by remember { mutableStateOf("AURORA") }
     
+    // 编辑模式：加载现有应用数据到UI状态
+    LaunchedEffect(existingApp) {
+        existingApp?.let { app ->
+            // 加载基本信息
+            appName = app.name
+            appIconPath = app.iconPath
+            
+            // 加载媒体类型
+            mediaType = app.appType
+            
+            // 加载媒体配置
+            app.mediaConfig?.let { config ->
+                // 尝试加载媒体文件
+                if (config.mediaPath.isNotBlank()) {
+                    // 检查是否是文件路径
+                    val file = java.io.File(config.mediaPath)
+                    if (file.exists()) {
+                        mediaUri = Uri.fromFile(file)
+                    } else if (config.mediaPath.startsWith("content://") || config.mediaPath.startsWith("file://")) {
+                        mediaUri = Uri.parse(config.mediaPath)
+                    }
+                }
+                
+                // 加载配置选项
+                enableAudio = config.enableAudio
+                loop = config.loop
+                autoPlay = config.autoPlay
+                fillScreen = config.fillScreen
+                orientation = config.orientation
+            }
+            
+            // 加载主题
+            themeType = app.themeType
+        }
+    }
+    
     // File选择器
     val imagePickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()

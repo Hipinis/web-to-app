@@ -1639,8 +1639,8 @@ fun WebViewConfigCard(
                 )
                 
                 SettingsSwitch(
-                    title = "SharedArrayBuffer / FFmpeg",
-                    subtitle = "启用跨域隔离 (COOP/COEP)，支持 FFmpeg.wasm 等库",
+                    title = Strings.crossOriginIsolationSetting,
+                    subtitle = Strings.crossOriginIsolationSettingHint,
                     checked = config.enableCrossOriginIsolation,
                     onCheckedChange = { onConfigChange(config.copy(enableCrossOriginIsolation = it)) }
                 )

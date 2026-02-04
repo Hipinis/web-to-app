@@ -254,16 +254,60 @@ data class AiModel(
 )
 
 /**
+ * API 格式类型（用于自定义端点）
+ */
+enum class ApiFormat {
+    OPENAI_COMPATIBLE,  // OpenAI 兼容格式（默认）
+    ANTHROPIC,          // Anthropic Claude 格式
+    GOOGLE_GEMINI;      // Google Gemini 格式
+    
+    val displayName: String get() = when (this) {
+        OPENAI_COMPATIBLE -> "OpenAI 兼容"
+        ANTHROPIC -> "Anthropic Claude"
+        GOOGLE_GEMINI -> "Google Gemini"
+    }
+}
+
+/**
  * API 密钥配置
  */
 data class ApiKeyConfig(
     val id: String = java.util.UUID.randomUUID().toString(),
     val provider: AiProvider,
     val apiKey: String,
-    val baseUrl: String? = null,           // Custom base URL（可选）
+    val baseUrl: String? = null,                    // Custom base URL（可选）
+    val customModelsEndpoint: String? = null,       // 自定义模型列表端点（如 /v1/models）
+    val customChatEndpoint: String? = null,         // 自定义聊天端点（如 /v1/chat/completions）
+    val apiFormat: ApiFormat = ApiFormat.OPENAI_COMPATIBLE, // API 格式类型
+    val alias: String? = null,                      // 用户自定义别名（用于识别）
     val isActive: Boolean = true,
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    /**
+     * 获取显示名称（别名或供应商名称）
+     */
+    val displayName: String get() = alias?.takeIf { it.isNotBlank() } ?: provider.displayName
+    
+    /**
+     * 获取有效的 models 端点
+     */
+    fun getEffectiveModelsEndpoint(): String {
+        return customModelsEndpoint?.takeIf { it.isNotBlank() } ?: provider.modelsEndpoint
+    }
+    
+    /**
+     * 获取有效的 chat 端点
+     */
+    fun getEffectiveChatEndpoint(): String {
+        return customChatEndpoint?.takeIf { it.isNotBlank() } ?: when (provider) {
+            AiProvider.GLM -> "/v4/chat/completions"
+            AiProvider.VOLCANO -> "/v3/chat/completions"
+            AiProvider.ANTHROPIC -> "/v1/messages"
+            AiProvider.GOOGLE -> "/v1beta/models"
+            else -> "/v1/chat/completions"
+        }
+    }
+}
 
 /**
  * 已保存的模型配置（用户选择并保存的模型）

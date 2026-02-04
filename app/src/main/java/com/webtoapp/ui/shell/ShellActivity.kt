@@ -32,17 +32,23 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -84,9 +90,11 @@ import com.webtoapp.core.forcedrun.ForcedRunConfig
 import com.webtoapp.core.forcedrun.ForcedRunManager
 import com.webtoapp.core.forcedrun.ForcedRunMode
 import com.webtoapp.core.forcedrun.ForcedRunPermissionDialog
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 
@@ -419,14 +427,20 @@ class ShellActivity : AppCompatActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
+        android.util.Log.d("ShellActivity", "Permission result received: $permissions")
         val allGranted = permissions.values.all { it }
+        android.util.Log.d("ShellActivity", "All permissions granted: $allGranted")
         pendingPermissionRequest?.let { request ->
             if (allGranted) {
+                android.util.Log.d("ShellActivity", "Granting WebView permission request")
                 request.grant(request.resources)
             } else {
+                android.util.Log.d("ShellActivity", "Denying WebView permission request")
                 request.deny()
             }
             pendingPermissionRequest = null
+        } ?: run {
+            android.util.Log.w("ShellActivity", "pendingPermissionRequest is null!")
         }
     }
     
@@ -474,22 +488,31 @@ class ShellActivity : AppCompatActivity() {
         val resources = request.resources
         val androidPermissions = mutableListOf<String>()
         
+        android.util.Log.d("ShellActivity", "handlePermissionRequest called, resources: ${resources.joinToString()}")
+        
         resources.forEach { resource ->
+            android.util.Log.d("ShellActivity", "Processing resource: $resource")
             when (resource) {
                 PermissionRequest.RESOURCE_VIDEO_CAPTURE -> {
                     androidPermissions.add(android.Manifest.permission.CAMERA)
+                    android.util.Log.d("ShellActivity", "Added CAMERA permission request")
                 }
                 PermissionRequest.RESOURCE_AUDIO_CAPTURE -> {
                     androidPermissions.add(android.Manifest.permission.RECORD_AUDIO)
+                    android.util.Log.d("ShellActivity", "Added RECORD_AUDIO permission request")
                 }
             }
         }
         
+        android.util.Log.d("ShellActivity", "Android permissions to request: ${androidPermissions.joinToString()}")
+        
         if (androidPermissions.isEmpty()) {
             // 不需要Android权限，直接授权WebView
+            android.util.Log.d("ShellActivity", "No Android permissions needed, granting WebView request directly")
             request.grant(resources)
         } else {
             // 需要先请求Android权限
+            android.util.Log.d("ShellActivity", "Requesting Android permissions...")
             pendingPermissionRequest = request
             permissionLauncher.launch(androidPermissions.toTypedArray())
         }
@@ -907,8 +930,18 @@ class ShellActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Persist cookies when app goes to background
+        // This ensures login state is saved even if app is killed
+        android.webkit.CookieManager.getInstance().flush()
+        com.webtoapp.core.shell.ShellLogger.logLifecycle("ShellActivity", "onPause - cookies flushed")
+    }
+    
     override fun onDestroy() {
         com.webtoapp.core.shell.ShellLogger.logLifecycle("ShellActivity", "onDestroy")
+        // Persist cookies before destroying WebView
+        android.webkit.CookieManager.getInstance().flush()
         // 只销毁 WebView，不清理存储数据（保留 localStorage 等）
         webView?.destroy()
         super.onDestroy()
@@ -934,6 +967,7 @@ fun ShellScreen(
     statusBarHeightDp: Int = 0
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val activity = context as android.app.Activity
     val activation = WebToAppApplication.activation
     val announcement = WebToAppApplication.announcement
@@ -948,6 +982,11 @@ fun ShellScreen(
     var showForcedRunPermissionDialog by remember { mutableStateOf(false) }
     var forcedRunPermissionChecked by remember { mutableStateOf(false) }
 
+    // Normalize appType (avoid case/whitespace issues)
+    val appType = config.appType.trim().uppercase()
+    // 调试：打印 appType
+    android.util.Log.d("ShellScreen", "appType='${config.appType}' (normalized='$appType'), targetUrl='${config.targetUrl}'")
+    
     // 状态
     var isLoading by remember { mutableStateOf(true) }
     var loadProgress by remember { mutableIntStateOf(0) }
@@ -1013,11 +1052,23 @@ fun ShellScreen(
     var longPressResult by remember { mutableStateOf<LongPressHandler.LongPressResult?>(null) }
     var longPressTouchX by remember { mutableFloatStateOf(0f) }
     var longPressTouchY by remember { mutableFloatStateOf(0f) }
-    val scope = rememberCoroutineScope()
     val longPressHandler = remember { LongPressHandler(context, scope) }
 
     // Initialize配置
     LaunchedEffect(Unit) {
+        // 设置界面语言（根据 APK 打包时的配置）
+        try {
+            val appLanguage = when (config.language.uppercase()) {
+                "ENGLISH" -> com.webtoapp.core.i18n.AppLanguage.ENGLISH
+                "ARABIC" -> com.webtoapp.core.i18n.AppLanguage.ARABIC
+                else -> com.webtoapp.core.i18n.AppLanguage.CHINESE
+            }
+            Strings.setLanguage(appLanguage)
+            android.util.Log.d("ShellActivity", "设置界面语言: ${config.language} -> $appLanguage")
+        } catch (e: Exception) {
+            android.util.Log.e("ShellActivity", "设置语言失败", e)
+        }
+        
         // Configure广告拦截
         if (config.adBlockEnabled) {
             adBlocker.initialize(config.adBlockRules, useDefaultRules = true)
@@ -1056,7 +1107,7 @@ fun ShellScreen(
 
         // Set横屏模式（Web应用或HTML应用或前端应用）
         if (config.webViewConfig.landscapeMode || 
-            ((config.appType == "HTML" || config.appType == "FRONTEND") && config.htmlConfig.landscapeMode)) {
+            ((appType == "HTML" || appType == "FRONTEND") && config.htmlConfig.landscapeMode)) {
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         }
 
@@ -1416,10 +1467,17 @@ fun ShellScreen(
 
             override fun onPermissionRequest(request: PermissionRequest?) {
                 // 通过Activity请求Android系统权限（摄像头、麦克风等）
+                android.util.Log.d("ShellActivity", "WebViewCallbacks.onPermissionRequest called, request: ${request?.resources?.joinToString()}")
                 request?.let { req ->
-                    (context as? ShellActivity)?.handlePermissionRequest(req)
-                        ?: req.grant(req.resources)
-                }
+                    val shellActivity = context as? ShellActivity
+                    android.util.Log.d("ShellActivity", "ShellActivity cast result: ${shellActivity != null}")
+                    if (shellActivity != null) {
+                        shellActivity.handlePermissionRequest(req)
+                    } else {
+                        android.util.Log.w("ShellActivity", "Context is not ShellActivity, granting directly")
+                        req.grant(req.resources)
+                    }
+                } ?: android.util.Log.w("ShellActivity", "Permission request is null")
             }
 
             override fun onShowFileChooser(
@@ -1662,13 +1720,20 @@ fun ShellScreen(
                         Text(forcedRunBlockedMessage)
                     }
                 }
-            } else if (config.appType == "IMAGE" || config.appType == "VIDEO") {
+            } else if (appType == "IMAGE" || appType == "VIDEO") {
                 // 单媒体应用模式
                 MediaContentDisplay(
-                    isVideo = config.appType == "VIDEO",
+                    isVideo = appType == "VIDEO",
                     mediaConfig = config.mediaConfig
                 )
-            } else if (config.appType == "HTML" || config.appType == "FRONTEND") {
+            } else if (appType == "GALLERY") {
+                // Gallery 画廊应用模式
+                android.util.Log.d("ShellScreen", "进入 GALLERY 分支，显示 ShellGalleryPlayer")
+                ShellGalleryPlayer(
+                    galleryConfig = config.galleryConfig,
+                    onBack = { activity.finish() }
+                )
+            } else if (appType == "HTML" || appType == "FRONTEND") {
                 // HTML/前端应用模式 - 加载嵌入在 APK assets 中的 HTML 文件
                 val htmlEntryFile = config.htmlConfig.getValidEntryFile()
                 val htmlUrl = "file:///android_asset/html/$htmlEntryFile"
@@ -1731,6 +1796,7 @@ fun ShellScreen(
                 )
             } else {
                 // WebView（网页应用）
+                android.util.Log.d("ShellScreen", "进入 WebView 分支 (else)，加载 URL: ${config.targetUrl}")
                 AndroidView(
                     factory = { ctx ->
                         WebView(ctx).apply {
@@ -1862,7 +1928,7 @@ fun ShellScreen(
                 onHome = { 
                     // 返回主页
                     val homeUrl = when {
-                        config.appType == "HTML" || config.appType == "FRONTEND" -> "file:///android_asset/html/${config.htmlConfig.getValidEntryFile()}"
+                        appType == "HTML" || appType == "FRONTEND" -> "file:///android_asset/html/${config.htmlConfig.getValidEntryFile()}"
                         else -> config.targetUrl
                     }
                     webViewRef?.loadUrl(homeUrl)
@@ -2691,4 +2757,702 @@ private fun injectTranslateScript(webView: android.webkit.WebView, targetLanguag
     """.trimIndent()
     
     webView.evaluateJavascript(translateScript, null)
+}
+
+/**
+ * Gallery 画廊播放器（Shell 模式）
+ * 从 APK 的 assets/gallery/ 目录加载媒体文件
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun ShellGalleryPlayer(
+    galleryConfig: com.webtoapp.core.shell.GalleryShellConfig,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val assetDecryptor = remember { com.webtoapp.core.crypto.AssetDecryptor(context) }
+    
+    // 获取排序后的媒体列表
+    val items = remember(galleryConfig) {
+        when (galleryConfig.playMode) {
+            "SHUFFLE" -> galleryConfig.items.shuffled()
+            else -> galleryConfig.items
+        }
+    }
+    var effectiveItems by remember { mutableStateOf(items) }
+    
+    // If config items are empty, try to derive from assets (for compatibility)
+    LaunchedEffect(items) {
+        effectiveItems = if (items.isNotEmpty()) {
+            items
+        } else {
+            val derived = deriveGalleryItemsFromAssets(context)
+            if (derived.isNotEmpty()) derived else items
+        }
+    }
+    
+    if (effectiveItems.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("没有媒体文件", color = Color.White)
+        }
+        return
+    }
+    
+    // Pager 状态
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = 0,
+        pageCount = { effectiveItems.size }
+    )
+    
+    // 当前项索引
+    val currentIndex by remember { derivedStateOf { pagerState.settledPage } }
+    val currentItem = effectiveItems.getOrNull(currentIndex)
+    
+    // 控制 UI 显示状态
+    var showControls by remember { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(galleryConfig.autoPlay) }
+    
+    // 图片自动播放计时器
+    LaunchedEffect(currentIndex, isPlaying) {
+        if (isPlaying && currentItem?.type == "IMAGE" && !pagerState.isScrollInProgress) {
+            kotlinx.coroutines.delay(galleryConfig.imageInterval * 1000L)
+            if (currentIndex < items.size - 1) {
+                pagerState.animateScrollToPage(currentIndex + 1)
+            } else if (galleryConfig.loop) {
+                pagerState.animateScrollToPage(0)
+            } else {
+                isPlaying = false
+            }
+        }
+    }
+    
+    // 自动隐藏控制 UI
+    LaunchedEffect(showControls) {
+        if (showControls) {
+            kotlinx.coroutines.delay(3000)
+            showControls = false
+        }
+    }
+    
+    // 背景颜色
+    val bgColor = remember(galleryConfig.backgroundColor) {
+        try {
+            Color(android.graphics.Color.parseColor(galleryConfig.backgroundColor))
+        } catch (e: Exception) {
+            Color.Black
+        }
+    }
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(bgColor)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { showControls = !showControls }
+                )
+            }
+    ) {
+        // 主内容 - HorizontalPager
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            val item = effectiveItems.getOrNull(page)
+            if (item != null) {
+                when (item.type) {
+                    "IMAGE" -> {
+                        ShellGalleryImageViewer(
+                            item = item,
+                            assetDecryptor = assetDecryptor,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    "VIDEO" -> {
+                        ShellGalleryVideoPlayer(
+                            item = item,
+                            assetDecryptor = assetDecryptor,
+                            isCurrentPage = page == currentIndex,
+                            isPlaying = isPlaying && page == currentIndex,
+                            enableAudio = galleryConfig.enableAudio,
+                            showControls = showControls,
+                            onPlayStateChange = { playing -> isPlaying = playing },
+                            onVideoEnded = {
+                                if (galleryConfig.videoAutoNext) {
+                                    scope.launch {
+                                        if (currentIndex < effectiveItems.size - 1) {
+                                            pagerState.animateScrollToPage(currentIndex + 1)
+                                        } else if (galleryConfig.loop) {
+                                            pagerState.animateScrollToPage(0)
+                                        }
+                                    }
+                                }
+                            },
+                            onToggleControls = { showControls = !showControls },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            }
+        }
+        
+        // 顶部信息栏
+        AnimatedVisibility(
+            visible = showControls && galleryConfig.showMediaInfo,
+            enter = fadeIn() + slideInVertically(),
+            exit = fadeOut() + slideOutVertically(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.Black.copy(alpha = 0.6f)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .statusBarsPadding(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    Column(modifier = Modifier.weight(1f)) {
+                        currentItem?.let { item ->
+                            Text(
+                                text = item.name.ifBlank { "Media ${currentIndex + 1}" },
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = "${currentIndex + 1} / ${effectiveItems.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                    
+                    // 媒体类型图标
+                    currentItem?.let { item ->
+                        Icon(
+                            if (item.type == "VIDEO") Icons.Outlined.Videocam 
+                            else Icons.Outlined.Image,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+        
+        // 播放/暂停按钮（仅图片模式）
+        if (currentItem?.type == "IMAGE") {
+            AnimatedVisibility(
+                visible = showControls,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                IconButton(
+                    onClick = { isPlaying = !isPlaying },
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(
+                            Color.Black.copy(alpha = 0.5f),
+                            androidx.compose.foundation.shape.CircleShape
+                        )
+                ) {
+                    Icon(
+                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        modifier = Modifier.size(36.dp),
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+        
+        // 左右导航箭头
+        AnimatedVisibility(
+            visible = showControls && currentIndex > 0,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(16.dp)
+        ) {
+            IconButton(
+                onClick = {
+                    scope.launch { pagerState.animateScrollToPage(currentIndex - 1) }
+                },
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        androidx.compose.foundation.shape.CircleShape
+                    )
+            ) {
+                Icon(
+                    Icons.Default.ChevronLeft,
+                    contentDescription = "Previous",
+                    tint = Color.White
+                )
+            }
+        }
+        
+        AnimatedVisibility(
+            visible = showControls && currentIndex < effectiveItems.size - 1,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(16.dp)
+        ) {
+            IconButton(
+                onClick = {
+                    scope.launch { pagerState.animateScrollToPage(currentIndex + 1) }
+                },
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        Color.Black.copy(alpha = 0.5f),
+                        androidx.compose.foundation.shape.CircleShape
+                    )
+            ) {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = "Next",
+                    tint = Color.White
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Derive gallery items from embedded assets when config items are empty.
+ * Looks for assets/gallery/item_*.{png|jpg|mp4|...} (and optional .enc).
+ */
+private fun deriveGalleryItemsFromAssets(
+    context: android.content.Context
+): List<com.webtoapp.core.shell.GalleryShellItem> {
+    return try {
+        val assetEntries = context.assets.list("gallery")?.toList().orEmpty()
+        if (assetEntries.isEmpty()) return emptyList()
+        
+        val entrySet = assetEntries.toSet()
+        val normalized = assetEntries.map { name ->
+            if (name.endsWith(".enc")) name.removeSuffix(".enc") else name
+        }.toSet()
+        
+        val videoExts = setOf("mp4", "webm", "mkv", "avi", "mov", "3gp", "m4v")
+        val imageExts = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif")
+        
+        normalized
+            .filter { it.startsWith("item_") }
+            .mapNotNull { name ->
+                val ext = name.substringAfterLast('.', "").lowercase()
+                val type = when {
+                    ext in videoExts -> "VIDEO"
+                    ext in imageExts -> "IMAGE"
+                    else -> null
+                } ?: return@mapNotNull null
+                
+                val index = name.substringAfter("item_").substringBefore(".").toIntOrNull()
+                val thumbName = index?.let { "thumb_$it.jpg" }
+                val thumbExists = thumbName?.let { tn -> tn in normalized || "${tn}.enc" in entrySet } == true
+                
+                val displayName = index?.let { "Media ${it + 1}" } ?: name
+                val sortKey = index ?: Int.MAX_VALUE
+                
+                com.webtoapp.core.shell.GalleryShellItem(
+                    id = name,
+                    assetPath = "gallery/$name",
+                    type = type,
+                    name = displayName,
+                    duration = 0,
+                    thumbnailPath = if (thumbExists) "gallery/$thumbName" else null
+                ) to sortKey
+            }
+            .sortedBy { it.second }
+            .map { it.first }
+    } catch (e: Exception) {
+        android.util.Log.w("ShellGallery", "Failed to derive gallery assets", e)
+        emptyList()
+    }
+}
+/**
+ * Gallery 图片查看器（从 assets 加载）
+ */
+@Composable
+fun ShellGalleryImageViewer(
+    item: com.webtoapp.core.shell.GalleryShellItem,
+    assetDecryptor: com.webtoapp.core.crypto.AssetDecryptor,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    // 加载图片
+    LaunchedEffect(item.assetPath) {
+        isLoading = true
+        try {
+            // 尝试加载加密版本
+            val imageBytes = try {
+                assetDecryptor.loadAsset(item.assetPath)
+            } catch (e: Exception) {
+                // 回退到非加密版本
+                context.assets.open(item.assetPath).use { it.readBytes() }
+            }
+            bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        } catch (e: Exception) {
+            android.util.Log.e("ShellGallery", "Failed to load image: ${item.assetPath}", e)
+        }
+        isLoading = false
+    }
+    
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(color = Color.White)
+        } else {
+            bitmap?.let { bmp ->
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Gallery 视频播放器（从 assets 加载）
+ */
+@Composable
+fun ShellGalleryVideoPlayer(
+    item: com.webtoapp.core.shell.GalleryShellItem,
+    assetDecryptor: com.webtoapp.core.crypto.AssetDecryptor,
+    isCurrentPage: Boolean,
+    isPlaying: Boolean,
+    enableAudio: Boolean,
+    showControls: Boolean,
+    onPlayStateChange: (Boolean) -> Unit,
+    onVideoEnded: () -> Unit,
+    onToggleControls: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    var player by remember { mutableStateOf<android.media.MediaPlayer?>(null) }
+    var surfaceHolder by remember { mutableStateOf<android.view.SurfaceHolder?>(null) }
+    var isPrepared by remember { mutableStateOf(false) }
+    var tempVideoFile by remember { mutableStateOf<java.io.File?>(null) }
+    var currentPosition by remember { mutableStateOf(0L) }
+    var duration by remember { mutableStateOf(0L) }
+    val isEncrypted = remember(item.assetPath) { assetDecryptor.isEncrypted(item.assetPath) }
+    
+    // 创建和释放 MediaPlayer
+    DisposableEffect(item.assetPath, isEncrypted) {
+        val mediaPlayer = android.media.MediaPlayer()
+        var assetFd: android.content.res.AssetFileDescriptor? = null
+        
+        val job = scope.launch(Dispatchers.IO) {
+            try {
+                // Set listeners on main thread
+                withContext(Dispatchers.Main) {
+                    mediaPlayer.setOnPreparedListener { mp ->
+                        isPrepared = true
+                        duration = mp.duration.toLong()
+                        surfaceHolder?.let { mp.setDisplay(it) }
+                        if (isPlaying) mp.start()
+                    }
+                    mediaPlayer.setOnCompletionListener {
+                        onVideoEnded()
+                    }
+                    mediaPlayer.setOnErrorListener { _, _, _ -> true }
+                }
+                
+                if (!isEncrypted) {
+                    // 优先使用 AssetFileDescriptor（避免大文件内存拷贝）
+                    try {
+                        assetFd = context.assets.openFd(item.assetPath)
+                        withContext(Dispatchers.Main) {
+                            mediaPlayer.setDataSource(
+                                assetFd!!.fileDescriptor,
+                                assetFd!!.startOffset,
+                                assetFd!!.length
+                            )
+                            mediaPlayer.prepareAsync()
+                        }
+                        return@launch
+                    } catch (e: Exception) {
+                        android.util.Log.w("ShellGallery", "openFd failed, fallback to stream copy: ${item.assetPath}", e)
+                    }
+                    
+                    // 回退：非加密资源流式复制到临时文件
+                    val ext = item.assetPath.substringAfterLast('.', "mp4")
+                    val tempFile = java.io.File(context.cacheDir, "gallery_video_${System.currentTimeMillis()}.$ext")
+                    context.assets.open(item.assetPath).use { input ->
+                        tempFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    tempVideoFile = tempFile
+                    withContext(Dispatchers.Main) {
+                        mediaPlayer.setDataSource(tempFile.absolutePath)
+                        mediaPlayer.prepareAsync()
+                    }
+                } else {
+                    // 加密资源：解密到临时文件
+                    val videoBytes = assetDecryptor.loadAsset(item.assetPath)
+                    val ext = item.assetPath.substringAfterLast('.', "mp4")
+                    val tempFile = java.io.File(context.cacheDir, "gallery_video_${System.currentTimeMillis()}.$ext")
+                    tempFile.writeBytes(videoBytes)
+                    tempVideoFile = tempFile
+                    withContext(Dispatchers.Main) {
+                        mediaPlayer.setDataSource(tempFile.absolutePath)
+                        mediaPlayer.prepareAsync()
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ShellGallery", "Failed to load video: ${item.assetPath}", e)
+            }
+        }
+        
+        player = mediaPlayer
+        
+        onDispose {
+            job.cancel()
+            try {
+                assetFd?.close()
+            } catch (e: Exception) {
+                // ignore
+            }
+            try {
+                mediaPlayer.stop()
+                mediaPlayer.release()
+            } catch (e: Exception) {
+                // ignore
+            }
+            player = null
+            isPrepared = false
+            // 清理临时文件
+            tempVideoFile?.delete()
+            tempVideoFile = null
+        }
+    }
+    
+    // 处理播放状态变化
+    LaunchedEffect(isPlaying, isPrepared, isCurrentPage) {
+        player?.let { mp ->
+            if (isPrepared) {
+                if (isPlaying && isCurrentPage) {
+                    if (!mp.isPlaying) mp.start()
+                } else {
+                    if (mp.isPlaying) mp.pause()
+                }
+            }
+        }
+    }
+    
+    // 处理音量
+    LaunchedEffect(enableAudio, isPrepared) {
+        player?.let { mp ->
+            if (isPrepared) {
+                mp.setVolume(
+                    if (enableAudio) 1f else 0f,
+                    if (enableAudio) 1f else 0f
+                )
+            }
+        }
+    }
+    
+    // 更新播放进度
+    LaunchedEffect(isPlaying, isPrepared) {
+        while (isPlaying && isPrepared) {
+            player?.let { mp ->
+                try {
+                    currentPosition = mp.currentPosition.toLong()
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
+            kotlinx.coroutines.delay(100)
+        }
+    }
+    
+    Box(
+        modifier = modifier
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onToggleControls() },
+                    onDoubleTap = { offset ->
+                        val width = size.width
+                        val seekAmount = 10000 // 10 seconds
+                        player?.let { mp ->
+                            if (isPrepared) {
+                                val newPosition = if (offset.x < width / 2) {
+                                    (mp.currentPosition - seekAmount).coerceAtLeast(0)
+                                } else {
+                                    (mp.currentPosition + seekAmount).coerceAtMost(mp.duration)
+                                }
+                                mp.seekTo(newPosition)
+                            }
+                        }
+                    }
+                )
+            }
+    ) {
+        // SurfaceView for video
+        AndroidView(
+            factory = { ctx ->
+                android.view.SurfaceView(ctx).apply {
+                    holder.addCallback(object : android.view.SurfaceHolder.Callback {
+                        override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                            surfaceHolder = holder
+                            player?.setDisplay(holder)
+                        }
+                        override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {}
+                        override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                            surfaceHolder = null
+                        }
+                    })
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+        
+        // 视频控制层
+        AnimatedVisibility(
+            visible = showControls,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.Black.copy(alpha = 0.7f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .navigationBarsPadding()
+                ) {
+                    // 进度条
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatTimeMs(currentPosition),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White
+                        )
+                        
+                        Slider(
+                            value = if (duration > 0) currentPosition.toFloat() / duration else 0f,
+                            onValueChange = { 
+                                player?.seekTo((it * duration).toInt())
+                                currentPosition = (it * duration).toLong()
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp),
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White,
+                                activeTrackColor = Color.White,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        )
+                        
+                        Text(
+                            text = formatTimeMs(duration),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White
+                        )
+                    }
+                    
+                    // 控制按钮
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 后退 10 秒
+                        IconButton(onClick = { 
+                            player?.let { mp ->
+                                if (isPrepared) mp.seekTo((mp.currentPosition - 10000).coerceAtLeast(0))
+                            }
+                        }) {
+                            Icon(
+                                Icons.Default.Replay10,
+                                contentDescription = "Seek Back",
+                                tint = Color.White
+                            )
+                        }
+                        
+                        // 播放/暂停
+                        IconButton(
+                            onClick = { onPlayStateChange(!isPlaying) },
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Icon(
+                                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                modifier = Modifier.size(36.dp),
+                                tint = Color.White
+                            )
+                        }
+                        
+                        // 快进 10 秒
+                        IconButton(onClick = { 
+                            player?.let { mp ->
+                                if (isPrepared) mp.seekTo((mp.currentPosition + 10000).coerceAtMost(mp.duration))
+                            }
+                        }) {
+                            Icon(
+                                Icons.Default.Forward10,
+                                contentDescription = "Seek Forward",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 格式化时间（毫秒）
+ */
+private fun formatTimeMs(ms: Long): String {
+    val seconds = (ms / 1000) % 60
+    val minutes = (ms / 1000 / 60) % 60
+    val hours = ms / 1000 / 60 / 60
+    return if (hours > 0) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%02d:%02d", minutes, seconds)
+    }
 }

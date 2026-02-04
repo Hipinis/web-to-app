@@ -673,13 +673,34 @@ fun AppCard(
                 Text(
                     text = when (app.appType) {
                         com.webtoapp.data.model.AppType.IMAGE -> {
-                            app.mediaConfig?.mediaPath ?: app.url
+                            app.mediaConfig?.mediaPath?.let { java.io.File(it).name } ?: app.url
                         }
                         com.webtoapp.data.model.AppType.VIDEO -> {
-                            app.mediaConfig?.mediaPath ?: app.url
+                            app.mediaConfig?.mediaPath?.let { java.io.File(it).name } ?: app.url
                         }
                         com.webtoapp.data.model.AppType.HTML -> {
                             app.htmlConfig?.entryFile?.takeIf { it.isNotBlank() } ?: "index.html"
+                        }
+                        com.webtoapp.data.model.AppType.FRONTEND -> {
+                            // 显示入口文件或项目目录
+                            app.htmlConfig?.entryFile?.takeIf { it.isNotBlank() }
+                                ?: app.htmlConfig?.projectDir?.let { java.io.File(it).name }
+                                ?: "index.html"
+                        }
+                        com.webtoapp.data.model.AppType.GALLERY -> {
+                            // 显示媒体数量统计
+                            val config = app.galleryConfig
+                            if (config != null && config.items.isNotEmpty()) {
+                                val imageCount = config.items.count { it.type == com.webtoapp.data.model.GalleryItemType.IMAGE }
+                                val videoCount = config.items.count { it.type == com.webtoapp.data.model.GalleryItemType.VIDEO }
+                                buildString {
+                                    if (imageCount > 0) append("$imageCount ${Strings.galleryImages}")
+                                    if (imageCount > 0 && videoCount > 0) append(", ")
+                                    if (videoCount > 0) append("$videoCount ${Strings.galleryVideos}")
+                                }
+                            } else {
+                                Strings.galleryEmpty
+                            }
                         }
                         else -> app.url
                     },

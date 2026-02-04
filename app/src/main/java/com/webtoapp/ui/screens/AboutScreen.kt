@@ -693,10 +693,33 @@ fun AboutScreen(
                             
                             Spacer(modifier = Modifier.height(16.dp))
                             
+                            // v1.9.5
+                            VersionSection(
+                                version = "v1.9.5",
+                                isLatest = true
+                            ) {
+                                ChangeItem("✨", Strings.cookiesPersistenceFeature)
+                                ChangeItem("✨", Strings.multiApiKeyManagement)
+                                ChangeItem("✨", Strings.modelNameSearchFeature)
+                                ChangeItem("✨", Strings.hideUrlPreviewFeature)
+                                ChangeItem("✨", Strings.popupBlockerFeature)
+                                ChangeItem("💪", Strings.optimizeCustomApiEndpoint)
+                                ChangeItem("💪", Strings.optimizeModelNameDisplay)
+                                ChangeItem("💪", Strings.optimizeMultiLanguageAdaptation)
+                                ChangeItem("🐛", Strings.fixGalleryBuildPath)
+                                ChangeItem("🐛", Strings.fixMicrophonePermission)
+                                ChangeItem("🐛", Strings.fixZoomPropertyNotWorking)
+                                ChangeItem("🐛", Strings.fixActivationCodeLanguage)
+                                ChangeItem("🐛", Strings.fixFrontendGalleryFilename)
+                                ChangeItem("🐛", Strings.fixCoreConfigEditAppType)
+                                ChangeItem("🐛", Strings.fixKeyboardInitIssue)
+                            }
+                            
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
                             // v1.9.0
                             VersionSection(
-                                version = "v1.9.0",
-                                isLatest = true
+                                version = "v1.9.0"
                             ) {
                                 ChangeItem("✨", Strings.browserEngineFeature)
                                 ChangeItem("✨", Strings.browserSpoofingFeature)

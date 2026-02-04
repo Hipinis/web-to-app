@@ -102,7 +102,7 @@ fun AiSettingsScreen(
                     apiKeys = apiKeys,
                     onAddClick = { 
                         if (apiKeys.isNotEmpty()) {
-                            selectedApiKey = apiKeys.first()
+                            selectedApiKey = null  // 让用户在对话框中选择
                             showAddModelDialog = true
                         }
                     },
@@ -154,14 +154,17 @@ fun AiSettingsScreen(
     }
     
     // 添加模型对话框
-    if (showAddModelDialog && selectedApiKey != null) {
+    if (showAddModelDialog && apiKeys.isNotEmpty()) {
         AddModelDialog(
-            apiKey = selectedApiKey!!,
+            apiKeys = apiKeys,
+            initialApiKey = selectedApiKey ?: apiKeys.first(),
             apiClient = apiClient,
             onDismiss = { showAddModelDialog = false },
-            onConfirm = { model ->
+            onConfirm = { models ->
                 scope.launch {
-                    configManager.saveModel(model)
+                    models.forEach { model ->
+                        configManager.saveModel(model)
+                    }
                     showAddModelDialog = false
                 }
             }
@@ -360,9 +363,14 @@ private fun SavedModelsSection(
                     )
                 }
             } else {
+                // 创建 API Key ID 到名称的映射
+                val apiKeyMap = apiKeys.associateBy { it.id }
+                
                 models.forEach { model ->
+                    val apiKeyName = apiKeyMap[model.apiKeyId]?.displayName
                     SavedModelItem(
                         model = model,
+                        apiKeyName = apiKeyName,
                         onEdit = { onEditClick(model) },
                         onDelete = { onDeleteClick(model) },
                         onSetDefault = { onSetDefaultClick(model) }
@@ -379,6 +387,7 @@ private fun SavedModelsSection(
 @Composable
 private fun SavedModelItem(
     model: SavedModel,
+    apiKeyName: String? = null,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onSetDefault: () -> Unit
@@ -420,8 +429,12 @@ private fun SavedModelItem(
                             }
                         }
                     }
+                    // 显示 API Key 名称和模型信息
                     Text(
-                        "${model.model.provider.displayName} / ${model.model.id}",
+                        if (apiKeyName != null) 
+                            "$apiKeyName · ${model.model.id}" 
+                        else 
+                            "${model.model.provider.displayName} / ${model.model.id}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -506,9 +519,14 @@ private fun AddApiKeyDialog(
     var selectedProvider by remember { mutableStateOf(initialConfig?.provider ?: AiProvider.GOOGLE) }
     var apiKey by remember { mutableStateOf(initialConfig?.apiKey ?: "") }
     var customBaseUrl by remember { mutableStateOf(initialConfig?.baseUrl ?: "") }
+    var customModelsEndpoint by remember { mutableStateOf(initialConfig?.customModelsEndpoint ?: "") }
+    var customChatEndpoint by remember { mutableStateOf(initialConfig?.customChatEndpoint ?: "") }
+    var selectedApiFormat by remember { mutableStateOf(initialConfig?.apiFormat ?: ApiFormat.OPENAI_COMPATIBLE) }
+    var alias by remember { mutableStateOf(initialConfig?.alias ?: "") }
     var showApiKey by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
+    var showAdvancedOptions by remember { mutableStateOf(initialConfig?.customModelsEndpoint != null || initialConfig?.customChatEndpoint != null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val apiClient = remember { AiApiClient(context) }
@@ -626,6 +644,16 @@ private fun AddApiKeyDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 
+                // 别名输入（用于识别多个相同供应商的 API Key）
+                OutlinedTextField(
+                    value = alias,
+                    onValueChange = { alias = it },
+                    label = { Text(Strings.aliasOptional) },
+                    placeholder = { Text(Strings.apiKeyAliasPlaceholder) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
                 // Custom Base URL（仅 CUSTOM 供应商显示）
                 if (selectedProvider == AiProvider.CUSTOM) {
                     OutlinedTextField(
@@ -637,6 +665,77 @@ private fun AddApiKeyDialog(
                         supportingText = { Text(Strings.openAiCompatibleHint) },
                         modifier = Modifier.fillMaxWidth()
                     )
+                    
+                    // API 格式选择
+                    var formatExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = formatExpanded,
+                        onExpandedChange = { formatExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedApiFormat.displayName,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text(Strings.apiFormat) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(formatExpanded) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = formatExpanded,
+                            onDismissRequest = { formatExpanded = false }
+                        ) {
+                            ApiFormat.entries.forEach { format ->
+                                DropdownMenuItem(
+                                    text = { Text(format.displayName) },
+                                    onClick = {
+                                        selectedApiFormat = format
+                                        formatExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    // 高级选项展开/收起
+                    TextButton(
+                        onClick = { showAdvancedOptions = !showAdvancedOptions },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            if (showAdvancedOptions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(Strings.advancedOptions)
+                    }
+                    
+                    // 高级选项：自定义端点
+                    AnimatedVisibility(visible = showAdvancedOptions) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = customModelsEndpoint,
+                                onValueChange = { customModelsEndpoint = it },
+                                label = { Text(Strings.modelsEndpoint) },
+                                placeholder = { Text("/v1/models") },
+                                singleLine = true,
+                                supportingText = { Text(Strings.modelsEndpointHint) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            OutlinedTextField(
+                                value = customChatEndpoint,
+                                onValueChange = { customChatEndpoint = it },
+                                label = { Text(Strings.chatEndpoint) },
+                                placeholder = { Text("/v1/chat/completions") },
+                                singleLine = true,
+                                supportingText = { Text(Strings.chatEndpointHint) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                 }
                 
                 // 测试结果
@@ -659,7 +758,11 @@ private fun AddApiKeyDialog(
                             id = initialConfig?.id ?: java.util.UUID.randomUUID().toString(),
                             provider = selectedProvider,
                             apiKey = apiKey,
-                            baseUrl = if (customBaseUrl.isNotBlank()) customBaseUrl else null
+                            baseUrl = if (customBaseUrl.isNotBlank()) customBaseUrl else null,
+                            customModelsEndpoint = if (customModelsEndpoint.isNotBlank()) customModelsEndpoint else null,
+                            customChatEndpoint = if (customChatEndpoint.isNotBlank()) customChatEndpoint else null,
+                            apiFormat = selectedApiFormat,
+                            alias = if (alias.isNotBlank()) alias else null
                         )
                         scope.launch {
                             isTesting = true
@@ -686,7 +789,11 @@ private fun AddApiKeyDialog(
                             id = initialConfig?.id ?: java.util.UUID.randomUUID().toString(),
                             provider = selectedProvider,
                             apiKey = apiKey,
-                            baseUrl = if (customBaseUrl.isNotBlank()) customBaseUrl else null
+                            baseUrl = if (customBaseUrl.isNotBlank()) customBaseUrl else null,
+                            customModelsEndpoint = if (customModelsEndpoint.isNotBlank()) customModelsEndpoint else null,
+                            customChatEndpoint = if (customChatEndpoint.isNotBlank()) customChatEndpoint else null,
+                            apiFormat = selectedApiFormat,
+                            alias = if (alias.isNotBlank()) alias else null
                         )
                         onConfirm(config)
                     },
@@ -716,42 +823,59 @@ private enum class ModelSortType(val displayName: String) {
 
 /**
  * 添加模型对话框
+ * 支持选择 API Key 和批量添加模型
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun AddModelDialog(
-    apiKey: ApiKeyConfig,
+    apiKeys: List<ApiKeyConfig>,
+    initialApiKey: ApiKeyConfig,
     apiClient: AiApiClient,
     onDismiss: () -> Unit,
-    onConfirm: (SavedModel) -> Unit
+    onConfirm: (List<SavedModel>) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    var selectedApiKey by remember { mutableStateOf(initialApiKey) }
     var models by remember { mutableStateOf<List<AiModel>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    var selectedModel by remember { mutableStateOf<AiModel?>(null) }
+    var selectedModels by remember { mutableStateOf<Set<AiModel>>(emptySet()) }  // 支持多选
     var customModelId by remember { mutableStateOf("") }
     var alias by remember { mutableStateOf("") }
     var selectedCapabilities by remember { mutableStateOf<Set<ModelCapability>>(setOf(ModelCapability.TEXT)) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var sortType by remember { mutableStateOf(ModelSortType.NAME) }
+    var isBatchMode by remember { mutableStateOf(false) }  // 批量模式
+    var searchQuery by remember { mutableStateOf("") }  // 搜索关键词
     
-    // Sort后的模型列表
-    val sortedModels = remember(models, sortType) {
+    // 过滤和排序后的模型列表
+    val filteredAndSortedModels = remember(models, sortType, searchQuery) {
+        val filtered = if (searchQuery.isBlank()) {
+            models
+        } else {
+            val query = searchQuery.lowercase()
+            models.filter { 
+                it.name.lowercase().contains(query) || 
+                it.id.lowercase().contains(query) 
+            }
+        }
         when (sortType) {
-            ModelSortType.NAME -> models.sortedBy { it.name }
-            ModelSortType.CONTEXT -> models.sortedByDescending { it.contextLength }
-            ModelSortType.PRICE_LOW -> models.sortedBy { it.inputPrice }
-            ModelSortType.PRICE_HIGH -> models.sortedByDescending { it.inputPrice }
+            ModelSortType.NAME -> filtered.sortedBy { it.name }
+            ModelSortType.CONTEXT -> filtered.sortedByDescending { it.contextLength }
+            ModelSortType.PRICE_LOW -> filtered.sortedBy { it.inputPrice }
+            ModelSortType.PRICE_HIGH -> filtered.sortedByDescending { it.inputPrice }
         }
     }
     
     // Load模型列表
-    LaunchedEffect(apiKey) {
+    LaunchedEffect(selectedApiKey) {
         isLoading = true
-        val result = apiClient.fetchModels(apiKey)
+        selectedModels = emptySet()  // 切换 API Key 时清空选择
+        val result = apiClient.fetchModels(selectedApiKey)
         if (result.isSuccess) {
             models = result.getOrNull() ?: emptyList()
+            errorMessage = null
         } else {
+            models = emptyList()
             errorMessage = result.exceptionOrNull()?.message
         }
         isLoading = false
@@ -769,13 +893,51 @@ private fun AddModelDialog(
                     .padding(24.dp)
             ) {
                 Text(Strings.addModel, style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "${Strings.addModelFrom} ${apiKey.provider.displayName}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 
                 Spacer(modifier = Modifier.height(16.dp))
+                
+                // API Key 选择器
+                var apiKeyExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = apiKeyExpanded,
+                    onExpandedChange = { apiKeyExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedApiKey.displayName,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text(Strings.selectApiKey) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(apiKeyExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = apiKeyExpanded,
+                        onDismissRequest = { apiKeyExpanded = false }
+                    ) {
+                        apiKeys.forEach { key ->
+                            DropdownMenuItem(
+                                text = { 
+                                    Column {
+                                        Text(key.displayName)
+                                        Text(
+                                            "****${key.apiKey.takeLast(4)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedApiKey = key
+                                    apiKeyExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
                 
                 if (isLoading) {
                     Box(
@@ -786,101 +948,206 @@ private fun AddModelDialog(
                     ) {
                         CircularProgressIndicator()
                     }
+                } else if (errorMessage != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            errorMessage ?: "",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 } else {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(450.dp)
+                            .height(400.dp)
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         // 模型选择
                         if (models.isNotEmpty()) {
-                            // Sort选项
+                            // 搜索框
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                placeholder = { Text(Strings.searchModels) },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Default.Clear, contentDescription = Strings.clear)
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                )
+                            )
+                            
+                            // Sort选项和批量模式切换
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("${Strings.selectModel} (${models.size})", style = MaterialTheme.typography.labelMedium)
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    ModelSortType.entries.forEach { type ->
-                                        FilterChip(
-                                            selected = sortType == type,
-                                            onClick = { sortType = type },
-                                            label = { Text(type.displayName, style = MaterialTheme.typography.labelSmall) },
-                                            modifier = Modifier.height(28.dp)
-                                        )
-                                    }
+                                Text(
+                                    "${Strings.selectModel} (${filteredAndSortedModels.size}/${models.size})", 
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // 批量模式切换
+                                    FilterChip(
+                                        selected = isBatchMode,
+                                        onClick = { 
+                                            isBatchMode = !isBatchMode
+                                            if (!isBatchMode) selectedModels = emptySet()
+                                        },
+                                        label = { Text(Strings.batchSelectModels, style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.height(28.dp)
+                                    )
                                 }
                             }
                             
-                            sortedModels.forEach { model ->
+                            // 排序选项
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                items(ModelSortType.entries.size) { index ->
+                                    val type = ModelSortType.entries[index]
+                                    FilterChip(
+                                        selected = sortType == type,
+                                        onClick = { sortType = type },
+                                        label = { Text(type.displayName, style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.height(28.dp)
+                                    )
+                                }
+                            }
+                            
+                            // 已选模型计数（批量模式）
+                            if (isBatchMode && selectedModels.isNotEmpty()) {
+                                Text(
+                                    Strings.selectedModelsCount.format(selectedModels.size),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            
+                            // 无搜索结果提示
+                            if (filteredAndSortedModels.isEmpty() && searchQuery.isNotEmpty()) {
+                                Text(
+                                    Strings.noSearchResults,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 16.dp)
+                                )
+                            }
+                            
+                            filteredAndSortedModels.forEach { model ->
+                                val isSelected = if (isBatchMode) model in selectedModels else selectedModels.size == 1 && model in selectedModels
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { selectedModel = model },
+                                        .clickable { 
+                                            if (isBatchMode) {
+                                                selectedModels = if (model in selectedModels) {
+                                                    selectedModels - model
+                                                } else {
+                                                    selectedModels + model
+                                                }
+                                            } else {
+                                                selectedModels = setOf(model)
+                                                customModelId = ""  // 清空手动输入
+                                            }
+                                        },
                                     shape = MaterialTheme.shapes.small,
-                                    color = if (selectedModel == model) 
+                                    color = if (isSelected) 
                                         MaterialTheme.colorScheme.primaryContainer 
                                     else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                 ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(model.name, style = MaterialTheme.typography.bodyMedium)
-                                            // Show上下文和价格
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                if (model.contextLength > 0) {
-                                                    Text(
-                                                        "${model.contextLength / 1000}K",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.primary
-                                                    )
-                                                }
-                                                if (model.inputPrice > 0) {
-                                                    Text(
-                                                        "$${String.format("%.2f", model.inputPrice)}",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.tertiary
-                                                    )
-                                                } else if (model.inputPrice == 0.0 && model.contextLength > 0) {
-                                                    Text(
-                                                        Strings.free,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.primary
-                                                    )
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // 批量模式显示复选框
+                                        if (isBatchMode) {
+                                            Checkbox(
+                                                checked = model in selectedModels,
+                                                onCheckedChange = { checked ->
+                                                    selectedModels = if (checked) {
+                                                        selectedModels + model
+                                                    } else {
+                                                        selectedModels - model
+                                                    }
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                        }
+                                        
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(model.name, style = MaterialTheme.typography.bodyMedium)
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    if (model.contextLength > 0) {
+                                                        Text(
+                                                            "${model.contextLength / 1000}K",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                    if (model.inputPrice > 0) {
+                                                        Text(
+                                                            "$${String.format("%.2f", model.inputPrice)}",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.tertiary
+                                                        )
+                                                    } else if (model.inputPrice == 0.0 && model.contextLength > 0) {
+                                                        Text(
+                                                            Strings.free,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
-                                        Text(
-                                            model.id,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        // Show能力标签
-                                        if (model.capabilities.isNotEmpty()) {
-                                            Row(
-                                                modifier = Modifier.padding(top = 4.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                model.capabilities.forEach { cap ->
-                                                    Surface(
-                                                        shape = MaterialTheme.shapes.extraSmall,
-                                                        color = when (cap) {
-                                                            ModelCapability.AUDIO -> MaterialTheme.colorScheme.primaryContainer
-                                                            ModelCapability.IMAGE -> MaterialTheme.colorScheme.tertiaryContainer
-                                                            else -> MaterialTheme.colorScheme.secondaryContainer
+                                            Text(
+                                                model.id,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (model.capabilities.isNotEmpty()) {
+                                                Row(
+                                                    modifier = Modifier.padding(top = 4.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    model.capabilities.take(3).forEach { cap ->
+                                                        Surface(
+                                                            shape = MaterialTheme.shapes.extraSmall,
+                                                            color = when (cap) {
+                                                                ModelCapability.AUDIO -> MaterialTheme.colorScheme.primaryContainer
+                                                                ModelCapability.IMAGE -> MaterialTheme.colorScheme.tertiaryContainer
+                                                                else -> MaterialTheme.colorScheme.secondaryContainer
+                                                            }
+                                                        ) {
+                                                            Text(
+                                                                cap.displayName,
+                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                                style = MaterialTheme.typography.labelSmall
+                                                            )
                                                         }
-                                                    ) {
-                                                        Text(
-                                                            cap.displayName,
-                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                            style = MaterialTheme.typography.labelSmall
-                                                        )
                                                     }
                                                 }
                                             }
@@ -890,55 +1157,57 @@ private fun AddModelDialog(
                             }
                         }
                         
-                        // 手动输入模型 ID
-                        Divider()
-                        Text(Strings.orManualInputModelId, style = MaterialTheme.typography.labelMedium)
-                        OutlinedTextField(
-                            value = customModelId,
-                            onValueChange = { 
-                                customModelId = it
-                                if (it.isNotBlank()) selectedModel = null
-                            },
-                            label = { Text(Strings.modelId) },
-                            placeholder = { Text(Strings.modelIdPlaceholder) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        
-                        // 别名
-                        OutlinedTextField(
-                            value = alias,
-                            onValueChange = { alias = it },
-                            label = { Text(Strings.aliasOptional) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        
-                        // 能力标签选择
-                        Text(Strings.capabilityTags, style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            Strings.selectCapabilitiesHint,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            ModelCapability.entries.forEach { capability ->
-                                FilterChip(
-                                    selected = capability in selectedCapabilities,
-                                    onClick = {
-                                        selectedCapabilities = if (capability in selectedCapabilities) {
-                                            selectedCapabilities - capability
-                                        } else {
-                                            selectedCapabilities + capability
-                                        }
-                                    },
-                                    label = { Text(capability.displayName) }
-                                )
+                        // 手动输入模型 ID（仅非批量模式）
+                        if (!isBatchMode) {
+                            Divider()
+                            Text(Strings.orManualInputModelId, style = MaterialTheme.typography.labelMedium)
+                            OutlinedTextField(
+                                value = customModelId,
+                                onValueChange = { 
+                                    customModelId = it
+                                    if (it.isNotBlank()) selectedModels = emptySet()
+                                },
+                                label = { Text(Strings.modelId) },
+                                placeholder = { Text(Strings.modelIdPlaceholder) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            // 别名
+                            OutlinedTextField(
+                                value = alias,
+                                onValueChange = { alias = it },
+                                label = { Text(Strings.aliasOptional) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            // 能力标签选择
+                            Text(Strings.capabilityTags, style = MaterialTheme.typography.labelMedium)
+                            Text(
+                                Strings.selectCapabilitiesHint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ModelCapability.entries.forEach { capability ->
+                                    FilterChip(
+                                        selected = capability in selectedCapabilities,
+                                        onClick = {
+                                            selectedCapabilities = if (capability in selectedCapabilities) {
+                                                selectedCapabilities - capability
+                                            } else {
+                                                selectedCapabilities + capability
+                                            }
+                                        },
+                                        label = { Text(capability.displayName) }
+                                    )
+                                }
                             }
                         }
                     }
@@ -956,33 +1225,56 @@ private fun AddModelDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            val model = selectedModel ?: AiModel(
-                                id = customModelId,
-                                name = customModelId,
-                                provider = apiKey.provider,
-                                isCustom = true
-                            )
-                            
-                            // 为每个能力生成默认的功能映射
-                            val defaultMappings = selectedCapabilities.associateWith { capability ->
-                                AiFeature.entries.filter { feature ->
-                                    feature.defaultCapabilities.contains(capability)
-                                }.toSet()
+                            val modelsToSave = if (isBatchMode && selectedModels.isNotEmpty()) {
+                                // 批量模式：为每个选中的模型创建 SavedModel
+                                selectedModels.map { model ->
+                                    val capabilities = model.capabilities.toSet().ifEmpty { setOf(ModelCapability.TEXT) }
+                                    val defaultMappings = capabilities.associateWith { capability ->
+                                        AiFeature.entries.filter { feature ->
+                                            feature.defaultCapabilities.contains(capability)
+                                        }.toSet()
+                                    }
+                                    SavedModel(
+                                        model = model,
+                                        apiKeyId = selectedApiKey.id,
+                                        alias = null,
+                                        capabilities = capabilities.toList(),
+                                        featureMappings = defaultMappings
+                                    )
+                                }
+                            } else {
+                                // 单个模式
+                                val model = selectedModels.firstOrNull() ?: AiModel(
+                                    id = customModelId,
+                                    name = customModelId,
+                                    provider = selectedApiKey.provider,
+                                    isCustom = true
+                                )
+                                
+                                val defaultMappings = selectedCapabilities.associateWith { capability ->
+                                    AiFeature.entries.filter { feature ->
+                                        feature.defaultCapabilities.contains(capability)
+                                    }.toSet()
+                                }
+                                
+                                listOf(SavedModel(
+                                    model = model,
+                                    apiKeyId = selectedApiKey.id,
+                                    alias = alias.ifBlank { null },
+                                    capabilities = selectedCapabilities.toList(),
+                                    featureMappings = defaultMappings
+                                ))
                             }
                             
-                            val savedModel = SavedModel(
-                                model = model,
-                                apiKeyId = apiKey.id,
-                                alias = alias.ifBlank { null },
-                                capabilities = selectedCapabilities.toList(),
-                                featureMappings = defaultMappings
-                            )
-                            
-                            onConfirm(savedModel)
+                            onConfirm(modelsToSave)
                         },
-                        enabled = selectedModel != null || customModelId.isNotBlank()
+                        enabled = (isBatchMode && selectedModels.isNotEmpty()) || 
+                                  (!isBatchMode && (selectedModels.isNotEmpty() || customModelId.isNotBlank()))
                     ) {
-                        Text(Strings.btnSave)
+                        Text(if (isBatchMode && selectedModels.size > 1) 
+                            Strings.addSelectedModels 
+                        else 
+                            Strings.btnSave)
                     }
                 }
             }

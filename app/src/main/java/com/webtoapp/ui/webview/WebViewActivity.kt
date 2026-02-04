@@ -1028,11 +1028,37 @@ fun WebViewScreen(
                 val entryFile = app.htmlConfig?.getValidEntryFile() ?: "index.html"
                 val htmlDir = File(context.filesDir, "html_projects/$projectId")
                 
+                // 调试日志
+                Log.d("WebViewActivity", "========== HTML App Debug Info ==========")
+                Log.d("WebViewActivity", "projectId: '$projectId'")
+                Log.d("WebViewActivity", "entryFile: '$entryFile'")
+                Log.d("WebViewActivity", "htmlDir: ${htmlDir.absolutePath}")
+                Log.d("WebViewActivity", "htmlDir.exists(): ${htmlDir.exists()}")
+                Log.d("WebViewActivity", "htmlConfig: ${app.htmlConfig}")
+                Log.d("WebViewActivity", "htmlConfig.files: ${app.htmlConfig?.files}")
+                
+                // 列出目录内容
+                if (htmlDir.exists()) {
+                    val files = htmlDir.listFiles()
+                    Log.d("WebViewActivity", "目录文件列表 (${files?.size ?: 0} 个):")
+                    files?.forEach { file ->
+                        Log.d("WebViewActivity", "  - ${file.name} (${file.length()} bytes)")
+                    }
+                    
+                    // 检查入口文件是否存在
+                    val entryFilePath = File(htmlDir, entryFile)
+                    Log.d("WebViewActivity", "入口文件路径: ${entryFilePath.absolutePath}")
+                    Log.d("WebViewActivity", "入口文件存在: ${entryFilePath.exists()}")
+                }
+                Log.d("WebViewActivity", "=========================================")
+                
                 if (htmlDir.exists()) {
                     try {
                         // Start本地服务器并获取 URL
                         val baseUrl = localHttpServer.start(htmlDir)
-                        "$baseUrl/$entryFile"
+                        val targetUrl = "$baseUrl/$entryFile"
+                        Log.d("WebViewActivity", "目标 URL: $targetUrl")
+                        targetUrl
                     } catch (e: Exception) {
                         Log.e("WebViewActivity", "启动本地服务器失败", e)
                         // 降级到 file:// 协议

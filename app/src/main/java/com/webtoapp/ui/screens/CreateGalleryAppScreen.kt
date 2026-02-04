@@ -112,6 +112,41 @@ fun CreateGalleryAppScreen(
     var isSelectionMode by remember { mutableStateOf(false) }
     var showItemDetailDialog by remember { mutableStateOf<GalleryItem?>(null) }
     
+    // 编辑模式：加载现有应用数据到UI状态
+    LaunchedEffect(existingApp) {
+        existingApp?.let { app ->
+            // 加载基本信息
+            appName = app.name
+            appIconPath = app.iconPath
+            themeType = app.themeType
+            
+            // 加载画廊配置
+            app.galleryConfig?.let { config ->
+                galleryItems = config.items
+                categories = config.categories
+                
+                // 播放设置
+                playMode = config.playMode
+                imageInterval = config.imageInterval
+                loop = config.loop
+                autoPlay = config.autoPlay
+                shuffleOnLoop = config.shuffleOnLoop
+                videoAutoNext = config.videoAutoNext
+                enableAudio = config.enableAudio
+                
+                // 显示设置
+                defaultView = config.defaultView
+                gridColumns = config.gridColumns
+                sortOrder = config.sortOrder
+                showThumbnailBar = config.showThumbnailBar
+                showMediaInfo = config.showMediaInfo
+                orientation = config.orientation
+                backgroundColor = config.backgroundColor
+                rememberPosition = config.rememberPosition
+            }
+        }
+    }
+    
     // File选择器 - 多选图片和视频
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()

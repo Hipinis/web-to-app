@@ -736,10 +736,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     processedHtmlFiles + savedOtherFiles
                 }
                 
+                // 检查是否有成功保存的 HTML 文件
+                if (savedHtmlFiles.none { it.type == com.webtoapp.data.model.HtmlFileType.HTML || it.name.endsWith(".html", ignoreCase = true) }) {
+                    android.util.Log.e("MainViewModel", "No HTML files were saved successfully. savedHtmlFiles=$savedHtmlFiles")
+                    _uiState.value = UiState.Error("保存失败：无法处理 HTML 文件，请检查文件是否有效")
+                    // 清理已创建的项目目录
+                    withContext(Dispatchers.IO) {
+                        HtmlStorage.deleteProject(context, projectId)
+                    }
+                    return@launch
+                }
+                
                 val savedHtmlConfig = htmlConfig?.copy(
                     projectId = projectId,
                     files = savedHtmlFiles
                 )
+                
+                android.util.Log.d("MainViewModel", "HTML app saved successfully: projectId=$projectId, files=${savedHtmlFiles.size}")
                 
                 // Cleanup temp files
                 withContext(Dispatchers.IO) {
