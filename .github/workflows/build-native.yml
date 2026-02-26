@@ -1,58 +1,79 @@
-name: Native App Production
+name: Manual Build Pro APK
 on:
-  repository_dispatch:
-    types: [start_build] # 接收来自 Vercel 的生产指令
+  workflow_dispatch: # 在 GitHub Actions 页面提供一个手动的 "Run workflow" 按钮
 
 jobs:
-  build_android:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出原生代码
+      - name: 检出源码
         uses: actions/checkout@v4
 
-      - name: 配置 Java 环境
+      - name: 配置 Java 17 环境
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
+          cache: gradle
 
-      - name: 核心二开：注入广告拦截引擎与动态网址
-        env:
-          PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+      - name: 生产准备：下载并提纯 11.txt 广告规则
         run: |
-          # 1. 自动下载并解析三大权威广告规则库 (11.txt 等)
+          # 1. 确保资产目录存在
+          mkdir -p app/src/main/assets
+          
+          # 2. 下载 AdGuard 11.txt 原始规则
+          curl -L "https://filters.adtidy.org/extension/chromium/filters/11.txt" -o raw_rules.txt
+          
+          # 3. 使用 Python 将庞大的规则加工成原生代码可识别的轻量文件
           python3 -c "
-          import urllib.request, json, os
-          payload = json.loads(os.environ['PAYLOAD'])
-          target_urls = [
-              'https://filters.adtidy.org/extension/chromium/filters/11.txt',
-              'https://filters.adtidy.org/extension/chromium/filters/2.txt',
-              'https://easylist-downloads.adblockplus.org/easylistchina.txt'
-          ]
+          import os
           ad_domains = set()
-          for url in target_urls:
-              try:
-                  lines = urllib.request.urlopen(url, timeout=15).read().decode('utf-8').splitlines()
-                  for line in lines:
-                      if line.startswith('||') and '^' in line:
-                          d = line[2:].split('^')[0].split('$')[0]
-                          if d: ad_domains.add(d)
-              except: pass
-          os.makedirs('app/src/main/assets', exist_ok=True)
-          with open('app/src/main/assets/adblock_rules.txt', 'w') as f: f.write('\n'.join(ad_domains))
+          css_selectors = set()
+          
+          try:
+              with open('raw_rules.txt', 'r', encoding='utf-8') as f:
+                  for line in f:
+                      line = line.strip()
+                      # 跳过空行和注释
+                      if not line or line.startswith('!') or line.startswith('['):
+                          continue
+                      
+                      # 提取 CSS 视觉隐藏规则 (##)
+                      if '##' in line:
+                          parts = line.split('##', 1)
+                          selector = parts[1]
+                          # 简单过滤掉复杂的 JS 脚本型规则，只保留纯 CSS 选择器
+                          if '{' not in selector and ':has(' not in selector:
+                              css_selectors.add(selector)
+                      
+                      # 提取网络拦截规则 (||domain^)
+                      elif line.startswith('||'):
+                          domain = line[2:].split('^')[0].split('$')[0].split('/')[0]
+                          if domain and '.' in domain:
+                              ad_domains.add(domain)
+          except Exception as e:
+              print(f'加工规则出错: {e}')
+
+          # 写入网络黑名单 (TXT格式)
+          with open('app/src/main/assets/adblock_rules.txt', 'w', encoding='utf-8') as f:
+              f.write('\n'.join(sorted(list(ad_domains))))
+          
+          # 写入视觉隐藏样式表 (CSS格式)
+          with open('app/src/main/assets/adblock.css', 'w', encoding='utf-8') as f:
+              if css_selectors:
+                  # 所有的选择器强制设为隐藏
+                  f.write(','.join(list(css_selectors)) + ' { display: none !important; visibility: hidden !important; height: 0 !important; width: 0 !important; pointer-events: none !important; }')
           "
+          echo "✅ 规则提纯完成：assets/adblock_rules.txt 和 adblock.css 已就绪"
 
-          # 2. 物理级修复状态栏重叠：修改所有 activity 布局文件
-          find app/src/main/res/layout -name "*.xml" -exec sed -i 's/android:layout_width=\"match_parent\"/android:layout_width=\"match_parent\" android:fitsSystemWindows=\"true\"/g' {} +
+      - name: 赋予编译脚本权限
+        run: chmod +x gradlew
 
-      - name: 赋予编译权限并执行锻造
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+      - name: 执行原生 Android 编译 (Debug)
+        run: ./gradlew assembleDebug
 
-      - name: 交付原生 APK 成品
+      - name: 交付成品 APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.client_payload.app_name }}_Native_Pro
+          name: WebToApp_Pro_Build
           path: app/build/outputs/apk/debug/*.apk
