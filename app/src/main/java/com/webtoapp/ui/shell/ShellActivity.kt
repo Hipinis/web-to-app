@@ -691,19 +691,18 @@ fun ShellScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
-    // 修复：将文件读取逻辑移出 remember 的 calculation parameter
-    var splashMediaExists by remember { mutableStateOf(false) }
-    
-    LaunchedEffect(config.splashEnabled) {
-        if (config.splashEnabled) {
+    // --- 彻底修复 Compose 编译错误：使用最安全的非 Composable 资产检查 ---
+    val splashMediaExists = remember(config.splashEnabled, config.splashType) {
+        if (!config.splashEnabled) {
+            false
+        } else {
             val extension = if (config.splashType == "VIDEO") "mp4" else "png"
             val assetPath = "splash_media.$extension"
             val encryptedPath = "$assetPath.enc"
-            val hasEncrypted = try { context.assets.open(encryptedPath).close(); true } catch (e: Exception) { false }
-            val hasNormal = try { context.assets.open(assetPath).close(); true } catch (e: Exception) { false }
-            splashMediaExists = hasEncrypted || hasNormal
-        } else {
-            splashMediaExists = false
+            
+            // 使用 context.assets.list 来检查文件是否存在，这是同步且非阻塞的，完美兼容 remember
+            val assetsList = try { context.assets.list("")?.toList() ?: emptyList() } catch (e: Exception) { emptyList() }
+            assetsList.contains(assetPath) || assetsList.contains(encryptedPath)
         }
     }
     
