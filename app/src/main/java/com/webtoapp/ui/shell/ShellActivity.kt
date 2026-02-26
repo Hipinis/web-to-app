@@ -104,7 +104,6 @@ import java.io.InputStreamReader
 /**
  * Shell Activity - 用于独立 WebApp 运行
  * 从 app_config.json 读取配置并显示 WebView
- * 【厂长定制：已缝合底层双引擎去广告逻辑】
  */
 class ShellActivity : AppCompatActivity() {
 
@@ -211,9 +210,7 @@ class ShellActivity : AppCompatActivity() {
                                 "CUSTOM" -> {
                                     val color = try {
                                         android.graphics.Color.parseColor(statusBarCustomColor ?: "#000000")
-                                    } catch (e: Exception) {
-                                        android.graphics.Color.BLACK
-                                    }
+                                    } catch (e: Exception) { android.graphics.Color.BLACK }
                                     window.statusBarColor = color
                                     val useDarkIcons = statusBarDarkIcons ?: isColorLight(color)
                                     controller.isAppearanceLightStatusBars = useDarkIcons
@@ -312,11 +309,21 @@ class ShellActivity : AppCompatActivity() {
         filePathCallback = null
     }
     
+    // Storage权限请求
     private val storagePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         val allGranted = permissions.values.all { it }
         if (allGranted) {
             pendingDownload?.let { download ->
-                DownloadHelper.handleDownload(this, download.url, download.userAgent, download.contentDisposition, download.mimeType, download.contentLength, DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER, lifecycleScope)
+                DownloadHelper.handleDownload(
+                    context = this,
+                    url = download.url,
+                    userAgent = download.userAgent,
+                    contentDisposition = download.contentDisposition,
+                    mimeType = download.mimeType,
+                    contentLength = download.contentLength,
+                    method = DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER,
+                    scope = lifecycleScope
+                )
             }
         } else {
             Toast.makeText(this, Strings.storagePermissionRequired, Toast.LENGTH_SHORT).show()
@@ -374,6 +381,7 @@ class ShellActivity : AppCompatActivity() {
         locationPermissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
     }
     
+    // 修复：修复了对 DownloadHelper.handleDownload 参数不匹配的问题
     fun handleDownloadWithPermission(url: String, userAgent: String, contentDisposition: String, mimeType: String, contentLength: Long) {
         val onBlobDownload: ((String, String) -> Unit) = { blobUrl, filename ->
             webView?.evaluateJavascript("""
@@ -411,13 +419,33 @@ class ShellActivity : AppCompatActivity() {
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            DownloadHelper.handleDownload(this, url, userAgent, contentDisposition, mimeType, contentLength, DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER, lifecycleScope, onBlobDownload = onBlobDownload)
+            DownloadHelper.handleDownload(
+                context = this, 
+                url = url, 
+                userAgent = userAgent, 
+                contentDisposition = contentDisposition, 
+                mimeType = mimeType, 
+                contentLength = contentLength, 
+                method = DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER, 
+                scope = lifecycleScope, 
+                onBlobDownload = onBlobDownload
+            )
             return
         }
         
         val hasPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         if (hasPermission) {
-            DownloadHelper.handleDownload(this, url, userAgent, contentDisposition, mimeType, contentLength, DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER, lifecycleScope, onBlobDownload = onBlobDownload)
+            DownloadHelper.handleDownload(
+                context = this, 
+                url = url, 
+                userAgent = userAgent, 
+                contentDisposition = contentDisposition, 
+                mimeType = mimeType, 
+                contentLength = contentLength, 
+                method = DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER, 
+                scope = lifecycleScope, 
+                onBlobDownload = onBlobDownload
+            )
         } else {
             pendingDownload = PendingDownload(url, userAgent, contentDisposition, mimeType, contentLength)
             storagePermissionLauncher.launch(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE))
@@ -663,19 +691,32 @@ fun ShellScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
-    val splashMediaExists = remember {
+    // 修复：将文件读取逻辑移出 remember 的 calculation parameter
+    var splashMediaExists by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(config.splashEnabled) {
         if (config.splashEnabled) {
             val extension = if (config.splashType == "VIDEO") "mp4" else "png"
             val assetPath = "splash_media.$extension"
             val encryptedPath = "$assetPath.enc"
             val hasEncrypted = try { context.assets.open(encryptedPath).close(); true } catch (e: Exception) { false }
             val hasNormal = try { context.assets.open(assetPath).close(); true } catch (e: Exception) { false }
-            hasEncrypted || hasNormal
-        } else false
+            splashMediaExists = hasEncrypted || hasNormal
+        } else {
+            splashMediaExists = false
+        }
     }
     
-    var showSplash by remember { mutableStateOf(config.splashEnabled && splashMediaExists) }
-    var splashCountdown by remember { mutableIntStateOf(if (config.splashEnabled && splashMediaExists) config.splashDuration else 0) }
+    var showSplash by remember { mutableStateOf(config.splashEnabled) } // 初始化为配置值
+    
+    // 当 splashMediaExists 确定后，更新 showSplash 的状态
+    LaunchedEffect(splashMediaExists) {
+        if (config.splashEnabled && !splashMediaExists) {
+            showSplash = false
+        }
+    }
+
+    var splashCountdown by remember { mutableIntStateOf(config.splashDuration) }
     var originalOrientation by remember { mutableIntStateOf(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) }
     
     LaunchedEffect(showSplash) {
@@ -781,8 +822,8 @@ fun ShellScreen(
 
     DisposableEffect(Unit) { onDispose { if (forcedRunActive) forcedRunManager.stopForcedRunMode() } }
 
-    LaunchedEffect(showSplash, splashCountdown) {
-        if (config.splashType == "VIDEO") return@LaunchedEffect
+    LaunchedEffect(showSplash, splashCountdown, splashMediaExists) {
+        if (config.splashType == "VIDEO" || !splashMediaExists) return@LaunchedEffect
         if (showSplash && splashCountdown > 0) {
             delay(1000L)
             splashCountdown--
@@ -1083,8 +1124,9 @@ fun ShellScreen(
                                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                                 webViewManager.configureWebView(this, webViewConfig, webViewCallbacks, config.extensionModuleIds, config.embeddedExtensionModules)
                                 
-                                // --- 【厂长定制：底层网络拦截器重写】 ---
-                                webViewClient = object : com.webtoapp.core.webview.BridgeWebViewClient(this@apply.let { WebToAppApplication.shellMode.getBridge(it) }) {
+                                // --- 【厂长定制：原生标准 WebViewClient 拦截】 ---
+                                // 修复：使用了标准原生的 WebViewClient 而不是第三方框架特有类
+                                webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                                         val uri = request?.url ?: return null
                                         val urlStr = uri.toString()
@@ -1233,7 +1275,7 @@ fun ShellScreen(
             )
         }
 
-        AnimatedVisibility(visible = showSplash, enter = fadeIn(animationSpec = tween(300)), exit = fadeOut(animationSpec = tween(300))) {
+        AnimatedVisibility(visible = showSplash && splashMediaExists, enter = fadeIn(animationSpec = tween(300)), exit = fadeOut(animationSpec = tween(300))) {
             ShellSplashOverlay(
                 splashType = config.splashType, countdown = splashCountdown, videoStartMs = config.splashVideoStartMs, videoEndMs = config.splashVideoEndMs, fillScreen = config.splashFillScreen, enableAudio = config.splashEnableAudio,
                 onSkip = if (config.splashClickToSkip) { closeSplash } else null, onComplete = closeSplash
