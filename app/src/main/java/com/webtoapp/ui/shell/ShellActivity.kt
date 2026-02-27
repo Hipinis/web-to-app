@@ -98,12 +98,11 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.util.HashSet
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 /**
  * Shell Activity - 用于独立 WebApp 运行
  * 从 app_config.json 读取配置并显示 WebView
+ * 【厂长专属：Pro级底层防重叠与百万级广告熔断修复版】
  */
 class ShellActivity : AppCompatActivity() {
 
@@ -112,22 +111,19 @@ class ShellActivity : AppCompatActivity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     
-    // --- 【厂长定制】：广告黑名单规则库 ---
+    // --- 厂长定制：存储 11.txt 提纯后的域名黑名单 ---
     val adBlockSet = HashSet<String>()
     
-    // Permission请求相关
     private var pendingPermissionRequest: PermissionRequest? = null
     private var pendingGeolocationOrigin: String? = null
     private var pendingGeolocationCallback: GeolocationPermissions.Callback? = null
 
     private var immersiveFullscreenEnabled: Boolean = false
-    private var showStatusBarInFullscreen: Boolean = false  // Fullscreen模式下是否显示状态栏
+    private var showStatusBarInFullscreen: Boolean = false 
     private var translateBridge: TranslateBridge? = null
     
-    // Video全屏前的屏幕方向
     private var originalOrientationBeforeFullscreen: Int = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     
-    // Status bar配置缓存
     private var statusBarColorMode: String = "THEME"
     private var statusBarCustomColor: String? = null
     private var statusBarDarkIcons: Boolean? = null
@@ -139,9 +135,6 @@ class ShellActivity : AppCompatActivity() {
     private var forcedRunConfig: ForcedRunConfig? = null
     private val forcedRunManager by lazy { ForcedRunManager.getInstance(this) }
 
-    /**
-     * 应用状态栏颜色配置
-     */
     private fun applyStatusBarColor(
         colorMode: String,
         customColor: String?,
@@ -149,7 +142,6 @@ class ShellActivity : AppCompatActivity() {
         isDarkTheme: Boolean
     ) {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
-        
         when (colorMode) {
             "TRANSPARENT" -> {
                 window.statusBarColor = android.graphics.Color.TRANSPARENT
@@ -168,10 +160,10 @@ class ShellActivity : AppCompatActivity() {
             }
             else -> {
                 if (isDarkTheme) {
-                    window.statusBarColor = android.graphics.Color.parseColor("#1C1B1F") 
+                    window.statusBarColor = android.graphics.Color.parseColor("#1C1B1F")
                     controller.isAppearanceLightStatusBars = false
                 } else {
-                    window.statusBarColor = android.graphics.Color.parseColor("#FFFBFE") 
+                    window.statusBarColor = android.graphics.Color.parseColor("#FFFBFE")
                     controller.isAppearanceLightStatusBars = true
                 }
             }
@@ -309,7 +301,6 @@ class ShellActivity : AppCompatActivity() {
         filePathCallback = null
     }
     
-    // Storage权限请求
     private val storagePermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         val allGranted = permissions.values.all { it }
         if (allGranted) {
@@ -381,54 +372,17 @@ class ShellActivity : AppCompatActivity() {
         locationPermissionLauncher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
     }
     
-    // 修复：修复了对 DownloadHelper.handleDownload 参数不匹配的问题
     fun handleDownloadWithPermission(url: String, userAgent: String, contentDisposition: String, mimeType: String, contentLength: Long) {
-        val onBlobDownload: ((String, String) -> Unit) = { blobUrl, filename ->
-            webView?.evaluateJavascript("""
-                (function() {
-                    try {
-                        const blobUrl = '$blobUrl';
-                        const filename = '$filename';
-                        if (blobUrl.startsWith('data:')) {
-                            const parts = blobUrl.split(',');
-                            const meta = parts[0];
-                            const base64Data = parts[1];
-                            const mimeMatch = meta.match(/data:([^;]+)/);
-                            const mimeType = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-                            if (window.AndroidDownload && window.AndroidDownload.saveBase64File) {
-                                window.AndroidDownload.saveBase64File(base64Data, filename, mimeType);
-                            }
-                        } else if (blobUrl.startsWith('blob:')) {
-                            fetch(blobUrl)
-                                .then(response => response.blob())
-                                .then(blob => {
-                                    const reader = new FileReader();
-                                    reader.onloadend = function() {
-                                        const base64Data = reader.result.split(',')[1];
-                                        const mimeType = blob.type || 'application/octet-stream';
-                                        if (window.AndroidDownload && window.AndroidDownload.saveBase64File) {
-                                            window.AndroidDownload.saveBase64File(base64Data, filename, mimeType);
-                                        }
-                                    };
-                                    reader.readAsDataURL(blob);
-                                })
-                        }
-                    } catch(e) {}
-                })();
-            """.trimIndent(), null)
-        }
-        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             DownloadHelper.handleDownload(
-                context = this, 
-                url = url, 
-                userAgent = userAgent, 
-                contentDisposition = contentDisposition, 
-                mimeType = mimeType, 
-                contentLength = contentLength, 
-                method = DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER, 
-                scope = lifecycleScope, 
-                onBlobDownload = onBlobDownload
+                context = this,
+                url = url,
+                userAgent = userAgent,
+                contentDisposition = contentDisposition,
+                mimeType = mimeType,
+                contentLength = contentLength,
+                method = DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER,
+                scope = lifecycleScope
             )
             return
         }
@@ -436,15 +390,14 @@ class ShellActivity : AppCompatActivity() {
         val hasPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         if (hasPermission) {
             DownloadHelper.handleDownload(
-                context = this, 
-                url = url, 
-                userAgent = userAgent, 
-                contentDisposition = contentDisposition, 
-                mimeType = mimeType, 
-                contentLength = contentLength, 
-                method = DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER, 
-                scope = lifecycleScope, 
-                onBlobDownload = onBlobDownload
+                context = this,
+                url = url,
+                userAgent = userAgent,
+                contentDisposition = contentDisposition,
+                mimeType = mimeType,
+                contentLength = contentLength,
+                method = DownloadHelper.DownloadMethod.DOWNLOAD_MANAGER,
+                scope = lifecycleScope
             )
         } else {
             pendingDownload = PendingDownload(url, userAgent, contentDisposition, mimeType, contentLength)
@@ -486,13 +439,12 @@ class ShellActivity : AppCompatActivity() {
             } catch (e: Exception) {}
         }
 
-        // --- 【厂长定制：异步加载广告过滤规则】 ---
+        // --- 厂长定制：异步预加载广告规则 ---
         Thread {
             try {
                 assets.open("adblock_rules.txt").bufferedReader().useLines { lines ->
                     lines.forEach { if (it.isNotBlank()) adBlockSet.add(it.trim()) }
                 }
-                android.util.Log.d("ProBlocker", "Rules Loaded: ${adBlockSet.size}")
             } catch (e: Exception) { 
                 android.util.Log.e("ProBlocker", "Rules Load Failed") 
             }
@@ -691,24 +643,23 @@ fun ShellScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var canGoForward by remember { mutableStateOf(false) }
 
-    // --- 彻底修复 Compose 编译错误：使用最安全的非 Composable 资产检查 ---
-    val splashMediaExists = remember(config.splashEnabled, config.splashType) {
-        if (!config.splashEnabled) {
-            false
-        } else {
+    var splashMediaExists by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(config.splashEnabled) {
+        if (config.splashEnabled) {
             val extension = if (config.splashType == "VIDEO") "mp4" else "png"
             val assetPath = "splash_media.$extension"
             val encryptedPath = "$assetPath.enc"
-            
-            // 使用 context.assets.list 来检查文件是否存在，这是同步且非阻塞的，完美兼容 remember
-            val assetsList = try { context.assets.list("")?.toList() ?: emptyList() } catch (e: Exception) { emptyList() }
-            assetsList.contains(assetPath) || assetsList.contains(encryptedPath)
+            val hasEncrypted = try { context.assets.open(encryptedPath).close(); true } catch (e: Exception) { false }
+            val hasNormal = try { context.assets.open(assetPath).close(); true } catch (e: Exception) { false }
+            splashMediaExists = hasEncrypted || hasNormal
+        } else {
+            splashMediaExists = false
         }
     }
     
-    var showSplash by remember { mutableStateOf(config.splashEnabled) } // 初始化为配置值
+    var showSplash by remember { mutableStateOf(config.splashEnabled) }
     
-    // 当 splashMediaExists 确定后，更新 showSplash 的状态
     LaunchedEffect(splashMediaExists) {
         if (config.splashEnabled && !splashMediaExists) {
             showSplash = false
@@ -835,7 +786,7 @@ fun ShellScreen(
         }
     }
     
-    // ===== BGM & LRC Logic (Kept Native) =====
+    // ===== BGM & LRC Logic =====
     var bgmPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var currentBgmIndex by remember { mutableIntStateOf(0) }
     var isBgmPlaying by remember { mutableStateOf(false) }
@@ -937,7 +888,6 @@ fun ShellScreen(
         onDispose { bgmPlayer?.let { if (it.isPlaying) it.stop(); it.release() }; bgmPlayer = null }
     }
 
-    // --- 【厂长定制】：双引擎拦截的 WebView 回调 ---
     val webViewCallbacks = remember {
         object : WebViewCallbacks {
             override fun onPageStarted(url: String?) { isLoading = true; currentUrl = url ?: "" }
@@ -1043,9 +993,11 @@ fun ShellScreen(
                 }
             }
         ) { padding ->
-            val systemStatusBarHeightDp = remember {
+            // --- 厂长修复：提取 LocalDensity.current 避免 remember 报错 ---
+            val density = LocalDensity.current
+            val systemStatusBarHeightDp = remember(density) {
                 val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-                if (resourceId > 0) with(LocalDensity.current) { context.resources.getDimensionPixelSize(resourceId).toDp() } else 24.dp
+                if (resourceId > 0) with(density) { context.resources.getDimensionPixelSize(resourceId).toDp() } else 24.dp
             }
             val actualStatusBarPadding = if (statusBarHeightDp > 0) statusBarHeightDp.dp else systemStatusBarHeightDp
             
@@ -1100,6 +1052,40 @@ fun ShellScreen(
                                     @Suppress("DEPRECATION") allowUniversalAccessFromFileURLs = true
                                     mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                                 }
+                                
+                                // --- 厂长定制：代理模式双层拦截引擎 (HTML分支) ---
+                                val originalClient = this.webViewClient
+                                this.webViewClient = object : WebViewClient() {
+                                    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                                        val urlStr = request?.url?.toString() ?: return null
+                                        if (urlStr.endsWith("/reality_internal_adblock.css")) {
+                                            return try { WebResourceResponse("text/css", "UTF-8", ctx.assets.open("adblock.css")) } catch (e: Exception) { null }
+                                        }
+                                        val host = request.url?.host ?: ""
+                                        val parts = host.split(".")
+                                        val checkDomain = StringBuilder()
+                                        for (i in parts.indices.reversed()) {
+                                            if (checkDomain.isNotEmpty()) checkDomain.insert(0, ".")
+                                            checkDomain.insert(0, parts[i])
+                                            if ((context as? ShellActivity)?.adBlockSet?.contains(checkDomain.toString()) == true) {
+                                                return WebResourceResponse("text/plain", "UTF-8", null)
+                                            }
+                                        }
+                                        return originalClient?.shouldInterceptRequest(view, request) ?: super.shouldInterceptRequest(view, request)
+                                    }
+                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = originalClient?.shouldOverrideUrlLoading(view, request) ?: super.shouldOverrideUrlLoading(view, request)
+                                    @Deprecated("Deprecated in Java")
+                                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = originalClient?.shouldOverrideUrlLoading(view, url) ?: super.shouldOverrideUrlLoading(view, url)
+                                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) { originalClient?.onPageStarted(view, url, favicon) ?: super.onPageStarted(view, url, favicon) }
+                                    override fun onPageFinished(view: WebView?, url: String?) { originalClient?.onPageFinished(view, url) ?: super.onPageFinished(view, url) }
+                                    override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { originalClient?.onReceivedError(view, request, error) ?: super.onReceivedError(view, request, error) } }
+                                    @Deprecated("Deprecated in Java")
+                                    override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) { originalClient?.onReceivedError(view, errorCode, description, failingUrl) ?: super.onReceivedError(view, errorCode, description, failingUrl) }
+                                    override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { originalClient?.onReceivedHttpError(view, request, errorResponse) ?: super.onReceivedHttpError(view, request, errorResponse) } }
+                                    override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) { originalClient?.onReceivedSslError(view, handler, error) ?: super.onReceivedSslError(view, handler, error) }
+                                    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) { originalClient?.doUpdateVisitedHistory(view, url, isReload) ?: super.doUpdateVisitedHistory(view, url, isReload) }
+                                }
+                                
                                 var lastTouchX = 0f; var lastTouchY = 0f
                                 setOnTouchListener { _, event ->
                                     when (event.action) {
@@ -1123,34 +1109,39 @@ fun ShellScreen(
                                 layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                                 webViewManager.configureWebView(this, webViewConfig, webViewCallbacks, config.extensionModuleIds, config.embeddedExtensionModules)
                                 
-                                // --- 【厂长定制：原生标准 WebViewClient 拦截】 ---
-                                // 修复：使用了标准原生的 WebViewClient 而不是第三方框架特有类
-                                webViewClient = object : WebViewClient() {
+                                // --- 厂长定制：代理模式双层拦截引擎 (核心Web分支) ---
+                                val originalClient = this.webViewClient
+                                this.webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                                        val uri = request?.url ?: return null
-                                        val urlStr = uri.toString()
-                                        
+                                        val urlStr = request?.url?.toString() ?: return null
                                         // 1. 同源 CSS 吐出 (视觉拦截)
                                         if (urlStr.endsWith("/reality_internal_adblock.css")) {
-                                            return try {
-                                                WebResourceResponse("text/css", "UTF-8", ctx.assets.open("adblock.css"))
-                                            } catch (e: Exception) { null }
+                                            return try { WebResourceResponse("text/css", "UTF-8", ctx.assets.open("adblock.css")) } catch (e: Exception) { null }
                                         }
-                                        
                                         // 2. 原生网络拦截 (域名拦截)
-                                        val host = uri.host ?: ""
+                                        val host = request.url?.host ?: ""
                                         val parts = host.split(".")
                                         val checkDomain = StringBuilder()
                                         for (i in parts.indices.reversed()) {
                                             if (checkDomain.isNotEmpty()) checkDomain.insert(0, ".")
                                             checkDomain.insert(0, parts[i])
-                                            val shellAct = context as? ShellActivity
-                                            if (shellAct?.adBlockSet?.contains(checkDomain.toString()) == true) {
+                                            if ((context as? ShellActivity)?.adBlockSet?.contains(checkDomain.toString()) == true) {
                                                 return WebResourceResponse("text/plain", "UTF-8", null)
                                             }
                                         }
-                                        return super.shouldInterceptRequest(view, request)
+                                        return originalClient?.shouldInterceptRequest(view, request) ?: super.shouldInterceptRequest(view, request)
                                     }
+                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = originalClient?.shouldOverrideUrlLoading(view, request) ?: super.shouldOverrideUrlLoading(view, request)
+                                    @Deprecated("Deprecated in Java")
+                                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = originalClient?.shouldOverrideUrlLoading(view, url) ?: super.shouldOverrideUrlLoading(view, url)
+                                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) { originalClient?.onPageStarted(view, url, favicon) ?: super.onPageStarted(view, url, favicon) }
+                                    override fun onPageFinished(view: WebView?, url: String?) { originalClient?.onPageFinished(view, url) ?: super.onPageFinished(view, url) }
+                                    override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { originalClient?.onReceivedError(view, request, error) ?: super.onReceivedError(view, request, error) } }
+                                    @Deprecated("Deprecated in Java")
+                                    override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) { originalClient?.onReceivedError(view, errorCode, description, failingUrl) ?: super.onReceivedError(view, errorCode, description, failingUrl) }
+                                    override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { originalClient?.onReceivedHttpError(view, request, errorResponse) ?: super.onReceivedHttpError(view, request, errorResponse) } }
+                                    override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: android.net.http.SslError?) { originalClient?.onReceivedSslError(view, handler, error) ?: super.onReceivedSslError(view, handler, error) }
+                                    override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) { originalClient?.doUpdateVisitedHistory(view, url, isReload) ?: super.doUpdateVisitedHistory(view, url, isReload) }
                                 }
                                 
                                 var lastTouchX = 0f; var lastTouchY = 0f
